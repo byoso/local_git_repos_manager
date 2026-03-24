@@ -9,7 +9,6 @@ def get_db() -> JsonDb:
         "repos.json",
         autosave=True,
         )
-    db.load()
     return db
 
 
@@ -21,5 +20,3 @@ class Repo(ValidatedDataClass):
     def _validate(self) -> None:
         if " " in self.project_name:
             raise DataValidationError("project_name must not contain spaces")
-        if " " in self.path:
-            raise DataValidationError("path must not contain spaces")

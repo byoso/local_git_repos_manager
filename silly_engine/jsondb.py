@@ -86,10 +86,12 @@ class Version:
 
 class Item:
     def __init__(self, data, collection, id=None) -> None:
-        if "_id" in data:
+        # prefer explicit id if provided, otherwise preserve existing data['_id'] or create new
+        if id is not None:
+            self.id = id
+        elif isinstance(data, dict) and data.get("_id") is not None:
             self.id = data["_id"]
-        self.id = id
-        if id is None:
+        else:
             self.id = str(uuid.uuid4())
         self.collection = collection
         self.data = data
@@ -186,6 +188,10 @@ class JsonDb:
         if self.is_autosaving:
             self.save()
 
+    def _ensure_dir(self, path) -> None:
+        if path:
+            os.makedirs(path, exist_ok=True)
+
     def collection(self, name: str) -> Collection:
         if name not in self.collections:
             self.collections[name] = Collection(name, self)
@@ -197,6 +203,8 @@ class JsonDb:
     def save(self) -> None:
         if self.file is None:
             return
+        dirpath = os.path.dirname(str(self.file))
+        self._ensure_dir(dirpath)
         data = {}
         for collection in self.collections:
             data[collection] = {}
@@ -206,27 +214,32 @@ class JsonDb:
             json_str = json.dumps(data, indent=2)
         except (TypeError, ValueError) as e:
             raise JsonDbError(e)
-        if not Path(self.file).exists():
-            os.makedirs(os.path.dirname(self.file), exist_ok=True)
         with open(self.file, 'w') as file:
             file.write(json_str)
 
     def load(self) -> None:
         if self.file is None:
             return
+        previous_autosave = self.is_autosaving
+        self.is_autosaving = False
+
         if os.path.exists(self.file):
             try:
-                if not Path(self.file).exists():
-                    os.makedirs(os.path.dirname(self.file), exist_ok=True)
                 with open(self.file, 'r') as file:
                     data = json.load(file)
             except json.JSONDecodeError:
+                self.is_autosaving = previous_autosave
                 raise JsonDbError(f"The JsonDb file {self.file} exists but seems to be corrupted.")
 
             for collection_name in data:
                 new_collection = self.collection(collection_name)
                 for id in data[collection_name]:
                     new_collection.insert(data[collection_name][id], id)
+
+        self.is_autosaving = previous_autosave
+
+        dirpath = os.path.dirname(str(self.file))
+        self._ensure_dir(dirpath)
 
     def show(self) -> str:
         width = self.width
@@ -315,7 +328,10 @@ class Collection:
         return display
 
     def first(self) -> None | dict:
-        """Returns the first item of the collection or None if the collection is empty"""
+        """
+        For singletons collections,
+        Returns the first item of the collection or None if the collection is empty
+        """
         if len(self.data) == 0:
             return None
         for key in self.data:
@@ -323,6 +339,9 @@ class Collection:
 
 
     def first_update(self, input_data: dict) -> dict | None:
+        """
+        For singletons collections, update the firts item
+        """
         if len(self.data) == 0:
             new_data = self.insert(input_data)
             return new_data
