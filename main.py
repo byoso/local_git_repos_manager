@@ -1,9 +1,9 @@
 #! /usr/bin/env python3
 from typing import Any
 
-from silly_engine import router
+from silly_engine.router import Router, RouterError
 
-from core import add_repo, delete_by_name, list_repos
+from core import add_repo, create_git_repo, delete_by_name, list_repos
 
 def print_res(res: Any | str) -> None:
     if isinstance(res, str):
@@ -11,6 +11,15 @@ def print_res(res: Any | str) -> None:
 
 def tui_add_repo(project_name: str, path: str) -> None:
     res = add_repo(project_name, path)
+    print_res(res)
+
+def tui_create_git_repo(project_name: str, path: str) -> None:
+    res = create_git_repo(project_name, path)
+    if isinstance(res, str):
+        print(
+            "Git repository 'project.git' created successfully.",
+            "To add this remote to your project, do:"
+        )
     print_res(res)
 
 def tui_delete_repo(project_name: str) -> None:
@@ -25,16 +34,20 @@ def tui_list_repos() -> None:
     if not repos:
         print("No repos found")
         return
-    print("Available repos:")
     for repo in repos:
-        print(f"- {repo.project_name}: {repo.path}")
+        availability = "✅"if repo.is_active else "❌"
+        print(f"{availability}- {repo.project_name}: {repo.path}")
 
 if __name__ == "__main__":
-    router = router.Router(name="local Git")
+    router = Router(name="local Git")
     router.add_routes([
         (("", "-h", "--help"), router.display_help, "Show this help message"),
-        ("list", tui_list_repos, "List all repos"),
+        (("list", "ls"), tui_list_repos, "List all repos"),
         ("add <project_name> <path>", tui_add_repo, "Add a new repo"),
-        ("remove <project_name>", tui_delete_repo, "Delete a repo by project name"),
+        ("create <project_name> <path>", tui_create_git_repo, "Create a new git repo"),
+        ("remove <project_name>", tui_delete_repo, "remove a remote repo from list, but does NOT actually delete it"),
     ])
-    router.query()
+    try:
+        router.query()
+    except RouterError as e:
+        print(f"Error: {e}")

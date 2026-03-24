@@ -1,5 +1,6 @@
 from pathlib import Path
 import logging
+import subprocess
 from models import Repo, get_db
 from silly_engine.data_validation import DataValidationError
 from silly_engine.logger import Logger
@@ -25,20 +26,38 @@ def add_repo(project_name: str, path: str) -> Repo | str:
         return f"Error creating repo: {e}"
     if Repos.filter(lambda r: r["project_name"] == project_name):
         return f"Repo with project_name '{project_name}' already exists"
-    if Repos.filter(lambda r: r["path"] == path):
-        return f"Repo with path '{path}' already exists"
     # check if path exists and is a git repository
     if not Path(path).exists():
         return f"Path '{path}' does not exist"
-    if not (Path(path) / project_name).exists():
-        return f"Path '{path}' is not a git repository"
-    # insert repo in db
     Repos.insert(repo)
     return f"Repo '{project_name}' added successfully"
 
 def create_git_repo(project_name: str, path: str) -> Repo | str:
     """Create the actual git repo if it doesn't exist"""
+    if Repos.filter(lambda r: r["project_name"] == project_name):
+        return f"Repo with project_name '{project_name}' already exists"
+    path = str(Path(path).expanduser().resolve())
+    if not Path(path).exists():
+        return f"Path '{path}' does not exist"
+    logger.debug(f"Creating bare git repo: {project_name} in {path}")
 
+    try:
+        repo_path = Path(path) / project_name
+        result = subprocess.run(
+            ["git", "init", "--bare", str(repo_path)],
+            capture_output=True,
+            text=True,
+            cwd=path
+        )
+        if result.returncode != 0:
+            return f"Error creating git repo: {result.stderr}"
+
+        instruction = f"git remote add local {path}/{project_name}"
+        return instruction
+    except FileNotFoundError:
+        return "Error: git command not found. Please install git."
+    except Exception as e:
+        return f"Error creating git repo: {e}"
 
 
 def delete_by_name(project_name: str) -> bool:
@@ -51,13 +70,10 @@ def delete_by_name(project_name: str) -> bool:
 def list_repos() -> list[Repo]:
     not_found = []
     found = []
+    repos = []
     for repo in Repos.all():
         if not (Path(repo["path"]) / repo["project_name"]).exists():
-            not_found.append(Repo(repo))
-        else:
-            found.append(Repo(repo))
-    if not_found:
-        logger.debug('Repos not found:')
-        for repo in not_found:
-            logger.debug(f"- {repo.project_name}: {repo.path}")
-    return found
+            repo["is_active"] = False
+        repos.append(Repo(repo))
+    repos.sort(key=lambda r: r.is_active, reverse=True)
+    return repos

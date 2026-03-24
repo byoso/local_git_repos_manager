@@ -6,7 +6,7 @@ from silly_engine.jsondb import JsonDb
 
 def get_db() -> JsonDb:
     db = JsonDb(
-        "repos.json",
+        "localGit.json",
         autosave=True,
         )
     return db
@@ -16,6 +16,7 @@ def get_db() -> JsonDb:
 class Repo(ValidatedDataClass):
     project_name: str = ""
     path: str = ""
+    is_active: bool = True
 
     def _validate(self) -> None:
         if " " in self.project_name:
