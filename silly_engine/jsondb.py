@@ -282,6 +282,11 @@ class Collection:
         """Add an item to the collection"""
         if is_dataclass(input_data) and not isinstance(input_data, type):
             input_data = asdict(input_data)
+
+        # Exclude 'id' field as it's redundant with _id
+        if isinstance(input_data, dict) and "id" in input_data:
+            del input_data["id"]
+
         item = Item(input_data, self, id=id)
         self.data[item.id] = item
         self._autosave()

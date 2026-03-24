@@ -36,7 +36,8 @@ def tui_list_repos() -> None:
         return
     for repo in repos:
         availability = "✅"if repo.is_active else "❌"
-        print(f"{availability}- {repo.project_name}: {repo.path}")
+        print(f"{availability}- {repo.project_name}: {repo.path} {repo._id}")
+
 
 if __name__ == "__main__":
     router = Router(name="local Git")

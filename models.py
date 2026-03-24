@@ -14,6 +14,7 @@ def get_db() -> JsonDb:
 
 @dataclass
 class Repo(ValidatedDataClass):
+    # id: str = ""
     project_name: str = ""
     path: str = ""
     is_active: bool = True

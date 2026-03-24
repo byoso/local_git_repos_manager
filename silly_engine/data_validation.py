@@ -53,6 +53,7 @@ class ValidatedDataClass(ABC):
     This class is expected to be inherited and needs to be used with
     @dataclass decorator and default values for all fields."""
     _data: InitVar[Dict[str, Any]]
+    _id: str = field(init=False, default="")
 
     def __post_init__(self, _data: Dict[str, Any]) -> None:
         # filter data to only include allowed fields
@@ -61,6 +62,11 @@ class ValidatedDataClass(ABC):
         for key, value in _data.items():
             if key in allowed:
                 setattr(self, key, _check_generic(value, allowed[key], key))
+
+        # Map _id from data if present
+        if "_id" in _data:
+            setattr(self, "_id", _data["_id"])
+
         self._validate()
 
     def _validate(self) -> None:
