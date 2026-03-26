@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 """
+Version: 1.0.0
 Data validation module
 """
 from abc import ABC

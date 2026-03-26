@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 
 """
+Version 1.0.0
 Use a json file as a database, read the docstrings to know more.
 
 e.g.:
@@ -85,17 +86,17 @@ class Version:
 
 
 class Item:
-    def __init__(self, data, collection, id=None) -> None:
+    def __init__(self, data, collection, _id=None) -> None:
         # prefer explicit id if provided, otherwise preserve existing data['_id'] or create new
-        if id is not None:
-            self.id = id
+        if _id is not None:
+            self._id = _id
         elif isinstance(data, dict) and data.get("_id") is not None:
-            self.id = data["_id"]
+            self._id = data["_id"]
         else:
-            self.id = str(uuid.uuid4())
+            self._id = str(uuid.uuid4())
         self.collection = collection
         self.data = data
-        self.data['_id'] = self.id
+        self.data['_id'] = self._id
 
     def __repr__(self) -> str:
         return f"<Item - {self.data}>"
@@ -131,9 +132,14 @@ class Item:
         self._autosave()
         return self
 
-    def delete(self) -> None:
-        del self.collection.data[self.id]
+    def delete(self) -> Item:
+        item = self
+        del self.collection.data[self._id]
         self._autosave()
+        return item
+
+    def to_dict(self) -> dict:
+        return self.data
 
 
 class JsonDb:
@@ -161,13 +167,13 @@ class JsonDb:
             settings = self.collection("_settings")
             settings.first_update({"version": self._version})
             self.save()
-        elif recorded_settings.get("version", None) is None:
+        elif recorded_settings.data.get("version", None) is None:
             settings.first_update({"version": self._version})
 
         # migrations
         recorded_settings = settings.first()
         assert recorded_settings is not None
-        recorded_version = recorded_settings.get("version", "0.0.0")
+        recorded_version = recorded_settings.data.get("version", "0.0.0")
         assert recorded_version is not None
         if self._migrations is not None:
             for migration in self._migrations:
@@ -278,44 +284,51 @@ class Collection:
         if self.database.is_autosaving:
             self.database.save()
 
-    def insert(self, input_data: dict | Any, id=None) -> dict:
+    def insert(self, input_data: dict | Any, _id=None) -> Item:
         """Add an item to the collection"""
         if is_dataclass(input_data) and not isinstance(input_data, type):
             input_data = asdict(input_data)
 
-        # Exclude 'id' field as it's redundant with _id
-        if isinstance(input_data, dict) and "id" in input_data:
-            del input_data["id"]
+        # Exclude '_id' field as it's redundant with the generated id
+        if isinstance(input_data, dict) and "_id" in input_data:
+            del input_data["_id"]
 
-        item = Item(input_data, self, id=id)
-        self.data[item.id] = item
+        item = Item(input_data, self, _id=_id)
+        self.data[item._id] = item
         self._autosave()
-        return item.data
+        return item
 
-    def update(self, input_data: dict, id=None) -> dict:
+    def update(self, input_data: dict, _id=None) -> Item:
         """Update an item in the collection"""
         if input_data.get("_id") is None:
-            if id is None:
+            if _id is None:
                 raise JsonDbError("The item must have an '_id' key")
             else:
-                input_data["_id"] = id
-        item = Item(input_data, self, id=input_data["_id"])
-        self.data[item.id] = item
+                input_data["_id"] = _id
+        item = Item(input_data, self, _id=input_data["_id"])
+        self.data[item._id] = item
         self._autosave()
-        return item.data
+        return item
 
-    def delete(self, input_data: dict, id=None) -> None:
+    def delete(self, input_data: dict | Item | str, _id=None) -> Item:
         """Delete an item from the collection
-        e.g: self.delete({"_id": "item_id"})
+        e.g: self.delete({"_id": "item_id"} | item_instance | "item_id")
         """
-        if id is None:
-            if input_data.get('_id') is None:
+        if _id is None:
+            if isinstance(input_data, Item):
+                _id = input_data._id
+            elif isinstance(input_data, dict) and input_data.get("_id") is not None:
+                _id = input_data["_id"]
+            elif isinstance(input_data, str):
+                _id = input_data
+            else:
                 raise JsonDbError("The item must have an '_id' key")
-            id = input_data.get('_id')
-        del self.data[id]
+        item = self.data[_id]
+        del self.data[_id]
         self._autosave()
+        return item
 
-    def all(self) -> list[dict]:
+    def all(self) -> list[Item]:
         """Returns all the items of the collection"""
         return self.filter(lambda x: True)
 
@@ -326,13 +339,13 @@ class Collection:
         width = self.database.width
         display = '\n+'+'-'*(width-2) + "+\n"
         display += f"|*-- Collection: {self.name} --*\n"
-        for id in self.data:
-            display += f"| {id} \n"
+        for _id in self.data:
+            display += f"| {_id} \n"
         display += f"| Total items: {len(self.data)}\n"
         display += '+'+'-'*(width-2) + "+\n"
         return display
 
-    def first(self) -> None | dict:
+    def first(self) -> None | Item:
         """
         For singletons collections,
         Returns the first item of the collection or None if the collection is empty
@@ -340,10 +353,10 @@ class Collection:
         if len(self.data) == 0:
             return None
         for key in self.data:
-            return self.data[key].data
+            return self.data[key]
 
 
-    def first_update(self, input_data: dict) -> dict | None:
+    def first_update(self, input_data: dict) -> Item | None:
         """
         For singletons collections, update the firts item
         """
@@ -351,29 +364,29 @@ class Collection:
             new_data = self.insert(input_data)
             return new_data
         for key in self.data:
-            new_item = Item(input_data, self, id=key)
+            new_item = Item(input_data, self, _id=key)
             self.data[key] = new_item
             self._autosave()
-            return self.data[key].data
+            return self.data[key]
 
 
-    def get(self, key: str) -> dict | None:
+    def get(self, key: str) -> Item | None:
         """Get a unique item dict from its id"""
         if key in self.data:
-            return self.data[key].data
+            return self.data[key]
 
 
-    def filter(self, query_func: Callable) -> list[dict]:
+    def filter(self, query_func: Callable) -> list[Item]:
         """Takes one parameter function that returns a boolean value
         example: queryset = Collection.filter(lambda x: x['age'] > 18)
 
         returns a list of datas.
         """
         queryset = []
-        for id in self.data:
+        for _id in self.data:
             try:
-                if query_func(self.data[id].data):
-                    queryset.append(self.data[id].data)
+                if query_func(self.data[_id].data):
+                    queryset.append(self.data[_id])
             except KeyError:
                 continue
         return queryset
@@ -384,8 +397,8 @@ class Collection:
         example: Collection.query_delete(lambda x: x['age'] > 18)
         """
         to_delete = []
-        for id in self.data:
-            item = self.data[id]
+        for _id in self.data:
+            item = self.data[_id]
             try:
                 if query_func(item.data):
                     to_delete.append(item)
