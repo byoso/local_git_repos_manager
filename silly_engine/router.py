@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 
 """
-file version: 1.0.0
+file version: 1.0.1
 A router for command line applications
 """
 
@@ -88,7 +88,7 @@ class Router:
     def add_route(self, incoming_route: str | Subrouter | list) -> None:
         # route is a string (comment)
         if isinstance(incoming_route, str):
-            self._help.append("# " + incoming_route)
+            self._help.append(incoming_route)
             return
         # route is a subrouter
         if isinstance(incoming_route, Subrouter):

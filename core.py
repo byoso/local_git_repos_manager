@@ -3,161 +3,167 @@ import logging
 import subprocess
 from uuid import uuid4
 
-from models import get_db, Configuration, Keep, Repo
+from models import get_db, Configuration, Store, Repo
 from silly_engine.data_validation import DataValidationError
 from silly_engine.logger import Logger
-from silly_engine.jsondb import Item
 
 logger = Logger("core.py")
 logger.level = logging.DEBUG
 
 
 db = get_db()
-Config = db.collection("config")
-Repos = db.collection("repos")
-Keeps = db.collection("keeps")
+Config = db.collection("config", model=Configuration)
+Repos = db.collection("repos", model=Repo)
+Stores = db.collection("stores", model=Store)
 
 
 # ----------------------------------------------------------------
-# REMOTE FUNCTIONS
+# STORE FUNCTIONS
 # ----------------------------------------------------------------
 
-def add_repo(name: str, path: str, description: str = "") -> Repo | str:
-    try:
-        repo = Repo({
-            "name": name,
-            "path": path,
-            "description": description,
-        })
-    except DataValidationError as e:
-        return f"Error creating repo: {e}"
-    if Repos.filter(lambda r: r["name"] == name):
-        return f"Repo with name '{name}' already exists"
-    Repos.insert(repo)
-    return repo
-
-def create_repo(name: str, keep_name: str) -> Repo | str:
-    keep = Keeps.filter(lambda k: k["name"] == keep_name)
-    if not keep:
-        return f"Keep with name '{keep_name}' not found"
-    path_obj = Path(keep[0].to_dict()["path"]).expanduser().resolve()
-    if not path_obj.exists():
-        return f"Path '{path_obj}' does not exist"
-
-    repo_path = path_obj / (name + ".git")
-    if repo_path.exists():
-        return f"Repo repository '{repo_path}' already exists"
-
-    result = subprocess.run(
-        ["git", "init", "--bare", str(repo_path)],
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        return f"Error creating repo repo: {result.stderr.strip()}"
-
-    # Save in the json db
-    repo_data = {"name": name, "path": str(repo_path), "keep_id": keep[0]._id}
-    repo = Repo(repo_data)
-    Repos.insert(repo)
-    return repo
-
-def remove_repo_by_id(repo_id: str) -> bool:
-    repo = Repos.filter(lambda r: r["_id"] == repo_id)
-    if not repo:
-        return False
-    Repos.delete(repo[0].to_dict())
-    return True
-
-def remove_repo_by_name(name: str) -> bool:
-    repo = Repos.filter(lambda r: r["name"] == name)
-    if not repo:
-        return False
-    Repos.delete(repo[0].to_dict())
-    return True
-
-def get_repo_by_id(repo_id: str) -> Repo | None:
-    repo = Repos.filter(lambda r: r["_id"] == repo_id)
-    if not repo:
-        return None
-    return Repo(repo[0].to_dict())
-
-def get_repo_by_name(name: str) -> Repo | None:
-    repo = Repos.filter(lambda r: r["name"] == name)
-    if not repo:
-        return None
-    return Repo(repo[0].to_dict())
-
-def list_repos() -> list[Repo]:
-    current_keep = get_current_config().data.get("current_keep_id")
-    if not current_keep:
-        return []
-    repos = []
-    for repo in Repos.all():
-        repo_obj = Repo(repo.to_dict())
-        if repo_obj.keep_id == current_keep:
-            repos.append(repo_obj)
-    return repos
-
-# ----------------------------------------------------------------
-# KEEP FUNCTIONS
-# ----------------------------------------------------------------
-
-def autoselect_keep() -> bool:
+def autoselect_store() -> bool:
     config = get_current_config()
-    current_keep_id = config.data.get("current_keep_id")
-    keeps_list = Keeps.all()
-    if not current_keep_id:
-        if not keeps_list:
-            return False
-        if current_keep_id is None or not any(k._id == current_keep_id for k in keeps_list):
-            Config.first_update({"current_keep_id": keeps_list[0]._id})
+    current_store_id = config.current_store_id
+    stores_list = Stores.all()
+    if not current_store_id:
+        if not stores_list:
+            config.current_store_id = ""
+        else:
+            config.current_store_id = stores_list[0]._id
+    Config.first_update(config)
     return True
 
-def list_keeps() -> list[Keep]:
-    autoselect_keep()
-    keeps = []
-    for keep in Keeps.all():
-        keeps.append(Keep(keep.to_dict()))
-    return keeps
+def list_stores() -> list[Store]:
+    autoselect_store()
+    stores = []
+    for store in Stores.all():
+        stores.append(store)
+    return stores
 
-def add_keep(name: str, path: str, description: str = "") -> Keep | str:
+def add_store(name: str, path: str, description: str = "") -> Store | str:
     try:
-        keep = Keep({
+        store = Store(**{
             "name": name,
             "path": path,
             "description": description,
+            "repos_ids": [],
         })
     except DataValidationError as e:
-        return f"Error creating keep: {e}"
-    if Keeps.filter(lambda k: k["name"] == name):
-        return f"Keep with name '{name}' already exists"
+        return f"Error creating store: {e}"
+    if Stores.filter(lambda k: k["name"] == name):
+        return f"Store with name '{name}' already exists"
     if not Path(path).expanduser().resolve().exists():
         return f"Path '{path}' does not exist"
-    Keeps.insert(keep)
-    autoselect_keep()
-    return keep
+    if not Path(path).expanduser().resolve().is_dir():
+        return f"Path '{path}' is not a directory"
+    Stores.insert(store)
+    autoselect_store()
+    return store
 
-def select_keep_by_id(keep_id: str) -> Keep | str:
-    keep = Keeps.filter(lambda k: k["_id"] == keep_id)
-    if not keep:
-        return f"Keep with id '{keep_id}' not found"
-    Config.first_update({"current_keep_id": keep_id})
-    return Keep(keep[0].to_dict())
+def _get_store_by_id(store_id: str) -> Store | None:
+    stores = Stores.filter(lambda k: k["_id"] == store_id)
+    if not stores:
+        return None
+    store = stores[0]
+    assert isinstance(store, Store)
+    return store
 
-def select_keep_by_name(name: str) -> Keep | str:
-    keep = Keeps.filter(lambda k: k["name"] == name)
-    if not keep:
-        return f"Keep with name '{name}' not found"
-    Config.first_update({"current_keep_id": keep[0]._id})
-    return Keep(keep[0].to_dict())
+def select_store_by_id(store_id: str) -> Store | str:
+    stores = Stores.filter(lambda k: k["_id"] == store_id)
+    if not stores:
+        return f"Store with id '{store_id}' not found"
+    store = stores[0]
+    assert isinstance(store, Store)
+    Config.first_update({"current_store_id": store_id})
+    return store
+
+def select_store_by_name(name: str) -> Store | str:
+    stores = Stores.filter(lambda k: k["name"] == name)
+    if not stores:
+        return f"Store with name '{name}' not found"
+    store = stores[0]
+    assert isinstance(store, Store)
+    if store.is_active:
+        Config.first_update({"current_store_id": store._id})
+    return store
+
+def delete_store_by_name(name: str) -> str:
+    stores = Stores.filter(lambda k: k["name"] == name)
+    if not stores:
+        return f"Store with name '{name}' not found"
+    store_id = stores[0]._id
+    Stores.delete(store_id)
+    autoselect_store()
+    return f"Store '{name}' deleted successfully"
 
 # ----------------------------------------------------------------
 # CONFIG FUNCTIONS
 # ----------------------------------------------------------------
 
-def get_current_config() -> Item:
+def get_current_config():
     config = Config.first()
     if not config:
-        config = Configuration({"current_keep_id": ""})
+        config = Configuration(**{"current_store_id": ""})
         config = Config.insert(config)
+    assert isinstance(config, Configuration)
     return config
+
+# ----------------------------------------------------------------
+# REPO FUNCTIONS
+# ----------------------------------------------------------------
+
+def _create_repo(repo: Repo) -> Repo:
+    """Create the actual git repository on the filesystem"""
+    store = _get_store_by_id(repo.store_id)
+    if store is None:
+        raise ValueError(f"Store with id '{repo.store_id}' not found")
+    if not store.is_active:
+        raise ValueError(f"Store with id '{repo.store_id}' is not active")
+    repo_path = Path(store.path).expanduser().resolve() / repo.name
+    repo.path = str(repo_path)
+    Repos.update(repo)
+    repo_path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "--bare", repo.name], cwd=store.path)
+    return repo
+
+def add_repo_to_store(name: str, description: str = "No description") -> str | Repo | None:
+    config = get_current_config()
+    store_id = config.current_store_id
+    store = _get_store_by_id(store_id)
+    if store is None or not store.is_active:
+        return "No active store selected. Please select an active store before adding a repo."
+    repo_path = Path(store.path).expanduser().resolve() / name
+    try:
+        repo = Repo(**{
+            "name": name,
+            "description": description,
+            "store_id": store_id,
+            "path": str(repo_path),
+        })
+    except DataValidationError as e:
+        return f"Error creating repo: {e}"
+    if Repos.filter(lambda k: k["name"] == name and k["store_id"] == store_id):
+        return f"Repo with name '{name}' already exists in this store"
+    repo = Repos.insert(repo)
+    assert isinstance(repo, Repo)
+    store.repos_ids.append(repo._id)
+    Stores.update(store)
+    assert isinstance(repo, Repo)
+    return f"Repo '{name}' added successfully"
+
+def add_and_create_repo(name: str, description: str = "No description") -> str | Repo:
+    add_repo_to_store(name, description)
+    config = get_current_config()
+    store_id = config.current_store_id
+    repos = Repos.filter(lambda k: k["name"] == name and k["store_id"] == store_id)
+    if not repos:
+        return f"Repo with name '{name}' not found in the current store after adding it"
+    repo = repos[0]
+    assert isinstance(repo, Repo)
+    return _create_repo(repo)
+
+def list_repos_in_current_store() -> list[Repo]:
+    config = get_current_config()
+    store_id = config.current_store_id
+    repos: list[Repo] = Repos.filter(lambda k: k["store_id"] == store_id)  # type: ignore
+    return repos

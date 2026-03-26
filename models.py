@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from silly_engine.data_validation import ValidatedDataClass, DataValidationError
@@ -14,7 +14,8 @@ def get_db() -> JsonDb:
 
 @dataclass
 class Configuration(ValidatedDataClass):
-    current_keep_id: str = ""
+    description: str = "Singleton"
+    current_store_id: str = ""
 
 
 @dataclass
@@ -22,7 +23,7 @@ class Repo(ValidatedDataClass):
     name: str = ""
     description: str = ""
     path: str = ""
-    keep_id: str = ""
+    store_id: str = ""
 
     def _validate(self) -> None:
         if " " in self.name:
@@ -35,11 +36,23 @@ class Repo(ValidatedDataClass):
         return False
 
 @dataclass
-class Keep(ValidatedDataClass):
-    """A keep is a file or directory where we want to store the Repos"""
+class Store(ValidatedDataClass):
+    """A store is a file or directory where we want to store the Repos"""
     name: str = ""
     description: str = ""
     path: str = ""
+    repos_ids: list[str] = field(default_factory=list)
+
+    @property
+    def repos(self) -> list[Repo]:
+        db = get_db()
+        repos = []
+        for repo_id in self.repos_ids:
+            repo = db.collections["repos"].get(repo_id)
+            if repo is not None:
+                repos.append(Repo(**repo))
+        return repos
+
 
     @property
     def is_active(self) -> bool:

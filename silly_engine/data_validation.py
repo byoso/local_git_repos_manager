@@ -1,10 +1,11 @@
 #! /usr/bin/env python3
 """
-Version: 1.0.0
+Version:
+- 1.1.0: constructor doesn't accept raw dict, do DataValidatedClass(**dict) instead
 Data validation module
 """
 from abc import ABC
-from dataclasses import dataclass, fields, InitVar, field
+from dataclasses import dataclass, fields, field, MISSING
 from typing import Any, get_origin, get_args, List, Dict
 
 class DataValidationError(Exception):
@@ -53,23 +54,34 @@ class ValidatedDataClass(ABC):
     """Data class with automatic validation.
     This class is expected to be inherited and needs to be used with
     @dataclass decorator and default values for all fields."""
-    _data: InitVar[Dict[str, Any]]
-    _id: str = field(init=False, default="")
+    _id: str = field(init=True, default="")
 
-    def __post_init__(self, _data: Dict[str, Any]) -> None:
-        # filter data to only include allowed fields
-        allowed = {f.name: f.type for f in fields(self)}
+    def __init__(self, *args, **kwargs) -> None:
+        # set declared fields only, using defaults when absent
+        for f in fields(self.__class__):
+            if f.name in kwargs:
+                val = kwargs.pop(f.name)
+            elif f.default is not MISSING:
+                val = f.default
+            else:
+                val = None
+            setattr(self, f.name, val)
+        # ignore any remaining kwargs (extras)
+        self.__post_init__()
 
-        for key, value in _data.items():
-            if key in allowed:
-                setattr(self, key, _check_generic(value, allowed[key], key))
-
-        # Map _id from data if present
-        if "_id" in _data:
-            setattr(self, "_id", _data["_id"])
-
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            try:
+                validated_value = _check_generic(value, field.type, field.name)
+                setattr(self, field.name, validated_value)
+            except DataValidationError as e:
+                raise DataValidationError(f"Error in field '{field.name}': {e}") from e
         self._validate()
 
     def _validate(self) -> None:
         # Additional validation logic can be added here
         pass
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}({self.__dict__})>"

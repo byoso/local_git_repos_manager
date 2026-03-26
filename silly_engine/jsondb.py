@@ -1,7 +1,9 @@
 #! /usr/bin/env python3
 
 """
-Version 1.0.0
+Version:
+- 1.1.1: support custom dataclass for input/output
+- 1.0.0
 Use a json file as a database, read the docstrings to know more.
 
 e.g.:
@@ -31,10 +33,11 @@ import json
 import os
 import uuid
 
-from typing import Any, Callable
+from typing import Any, Callable, Generic, Sequence, Type, TypeVar
 
 WIDTH=80
 
+OutputModel = TypeVar('OutputModel')
 
 class JsonDbError(Exception):
     pass
@@ -86,7 +89,7 @@ class Version:
 
 
 class Item:
-    def __init__(self, data, collection, _id=None) -> None:
+    def __init__(self, data: dict | Any, collection: Collection, _id=None) -> None:
         # prefer explicit id if provided, otherwise preserve existing data['_id'] or create new
         if _id is not None:
             self._id = _id
@@ -165,7 +168,7 @@ class JsonDb:
         recorded_settings = settings.first()
         if recorded_settings is None:
             settings = self.collection("_settings")
-            settings.first_update({"version": self._version})
+            settings.first_update({"version": self._version, "description": "Singleton JsonDb Configuration"})
             self.save()
         elif recorded_settings.data.get("version", None) is None:
             settings.first_update({"version": self._version})
@@ -198,13 +201,16 @@ class JsonDb:
         if path:
             os.makedirs(path, exist_ok=True)
 
-    def collection(self, name: str) -> Collection:
+    def collection(self, name: str, model: Type[OutputModel] | None=None) -> Collection:
         if name not in self.collections:
-            self.collections[name] = Collection(name, self)
+            self.collections[name] = Collection(name, self, model=model)
             self._autosave()
             return self.collections[name]
         else:
-            return self.collections[name]
+            collection = self.collections[name]
+            if model is not None:
+                collection.model = model
+            return collection
 
     def save(self) -> None:
         if self.file is None:
@@ -270,12 +276,17 @@ class JsonDb:
             self._autosave()
 
 
-class Collection:
+class Collection(Generic[OutputModel]):
     """Collection of dictionnary objects"""
-    def __init__(self, name: str, db: JsonDb) -> None:
+    def __init__(self, name: str, db: JsonDb, model: Type[OutputModel] | None=None) -> None:
         self.database = db
         self.name = name
         self.data = {}
+        self.model = model
+
+        if not is_dataclass(model) and model is not None:
+            raise JsonDbError("The model must be a dataclass")
+
 
     def __repr__(self) -> str:
         return f"<{self.name} - objects in collection: {len(self.database.collection(self.name).data)}>"
@@ -284,7 +295,16 @@ class Collection:
         if self.database.is_autosaving:
             self.database.save()
 
-    def insert(self, input_data: dict | Any, _id=None) -> Item:
+    def _output_model_format(self, item: Item) -> Item | OutputModel:
+        """Format the output data with the model if it exists, return a dict if the formatting fails"""
+        if self.model is None:
+            return item
+        try:
+            return self.model(**item.data)
+        except Exception as e:
+            raise JsonDbError(f"Output formatting error for collection '{self.name}': {e}")
+
+    def insert(self, input_data: dict | Any | OutputModel, _id=None) -> Item | OutputModel:
         """Add an item to the collection"""
         if is_dataclass(input_data) and not isinstance(input_data, type):
             input_data = asdict(input_data)
@@ -296,10 +316,16 @@ class Collection:
         item = Item(input_data, self, _id=_id)
         self.data[item._id] = item
         self._autosave()
-        return item
+        return self._output_model_format(item)
 
-    def update(self, input_data: dict, _id=None) -> Item:
+    def update(self, input_data: dict | Any | OutputModel, _id=None) -> Item | OutputModel:
         """Update an item in the collection"""
+        if is_dataclass(input_data) and not isinstance(input_data, type):
+            input_data = asdict(input_data)
+        try:
+            assert isinstance(input_data, dict), "Input data must be a dict or a dataclass instance"
+        except AssertionError as e:
+            raise JsonDbError(e)
         if input_data.get("_id") is None:
             if _id is None:
                 raise JsonDbError("The item must have an '_id' key")
@@ -308,9 +334,9 @@ class Collection:
         item = Item(input_data, self, _id=input_data["_id"])
         self.data[item._id] = item
         self._autosave()
-        return item
+        return self._output_model_format(item)
 
-    def delete(self, input_data: dict | Item | str, _id=None) -> Item:
+    def delete(self, input_data: dict | Item | OutputModel | str, _id=None) -> str:
         """Delete an item from the collection
         e.g: self.delete({"_id": "item_id"} | item_instance | "item_id")
         """
@@ -321,14 +347,19 @@ class Collection:
                 _id = input_data["_id"]
             elif isinstance(input_data, str):
                 _id = input_data
+            elif is_dataclass(input_data) and not isinstance(input_data, type):
+                input_dict = asdict(input_data)
+                if input_dict.get("_id") is not None:
+                    _id = input_dict["_id"]
+                else:
+                    raise JsonDbError("The item must have an '_id' key")
             else:
                 raise JsonDbError("The item must have an '_id' key")
-        item = self.data[_id]
         del self.data[_id]
         self._autosave()
-        return item
+        return _id
 
-    def all(self) -> list[Item]:
+    def all(self) -> Sequence[Item | OutputModel]:
         """Returns all the items of the collection"""
         return self.filter(lambda x: True)
 
@@ -345,7 +376,7 @@ class Collection:
         display += '+'+'-'*(width-2) + "+\n"
         return display
 
-    def first(self) -> None | Item:
+    def first(self) -> None | Item | OutputModel:
         """
         For singletons collections,
         Returns the first item of the collection or None if the collection is empty
@@ -353,13 +384,15 @@ class Collection:
         if len(self.data) == 0:
             return None
         for key in self.data:
-            return self.data[key]
+            return self._output_model_format(self.data[key])
 
 
-    def first_update(self, input_data: dict) -> Item | None:
+    def first_update(self, input_data: dict | Item | OutputModel) -> Item | OutputModel | None:
         """
         For singletons collections, update the firts item
         """
+        if is_dataclass(input_data) and not isinstance(input_data, type):
+            input_data = asdict(input_data)
         if len(self.data) == 0:
             new_data = self.insert(input_data)
             return new_data
@@ -367,16 +400,17 @@ class Collection:
             new_item = Item(input_data, self, _id=key)
             self.data[key] = new_item
             self._autosave()
-            return self.data[key]
+            # only the first item, so return here:
+            return self._output_model_format(new_item)
 
 
-    def get(self, key: str) -> Item | None:
+    def get(self, key: str) -> Item | OutputModel | None:
         """Get a unique item dict from its id"""
         if key in self.data:
-            return self.data[key]
+            return self._output_model_format(self.data[key])
 
 
-    def filter(self, query_func: Callable) -> list[Item]:
+    def filter(self, query_func: Callable) -> Sequence[Item | OutputModel]:
         """Takes one parameter function that returns a boolean value
         example: queryset = Collection.filter(lambda x: x['age'] > 18)
 
@@ -386,13 +420,13 @@ class Collection:
         for _id in self.data:
             try:
                 if query_func(self.data[_id].data):
-                    queryset.append(self.data[_id])
+                    queryset.append(self._output_model_format(self.data[_id]))
             except KeyError:
                 continue
         return queryset
 
 
-    def filter_delete(self, query_func: Callable) -> None:
+    def filter_delete(self, query_func: Callable) -> list[str]:
         """Takes one parameter function that returns a boolean value
         example: Collection.query_delete(lambda x: x['age'] > 18)
         """
@@ -401,9 +435,10 @@ class Collection:
             item = self.data[_id]
             try:
                 if query_func(item.data):
-                    to_delete.append(item)
+                    to_delete.append(item._id)
             except KeyError:
                 continue
-        for item in to_delete:
-            item.delete()
+        for item_id in to_delete:
+            self.data[item_id].delete()
         self._autosave()
+        return to_delete

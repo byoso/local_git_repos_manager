@@ -1,1 +1,3 @@
 # WIP...
+
+A tool to use git locally as a personnal github, with a usb key or an external disk as remote storage
