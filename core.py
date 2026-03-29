@@ -91,8 +91,11 @@ def delete_store_by_name(name: str) -> str:
     stores = Stores.filter(lambda k: k["name"] == name)
     if not stores:
         return f"Store with name '{name}' not found"
-    store_id = stores[0]._id
-    Stores.delete(store_id)
+    store = stores[0]
+    assert isinstance(store, Store)
+    for repo_id in store.repos_ids:
+        Repos.delete(repo_id)
+    Stores.delete(store._id)
     autoselect_store()
     return f"Store '{name}' deleted successfully"
 

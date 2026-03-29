@@ -400,6 +400,8 @@ class MainWindow(gtk.Window):
         page1.pack_start(scrolled, True, True, 0)
 
         notebook.append_page(page1, gtk.Label(label="Stores"))
+        # keep references to pages so we can refresh when the user switches tabs
+        self.stores_page = page1
 
         # Repositories tab
         page2 = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
@@ -408,15 +410,15 @@ class MainWindow(gtk.Window):
         repo_header.set_margin_top(8)
         repo_header.set_margin_bottom(8)
 
-        add_repo_btn = gtk.Button(label="+ Add Repo")
-        create_new_btn = gtk.Button(label="+ Create New Repo")
+        self.add_repo_btn = gtk.Button(label="+ Add Repo")
+        self.create_new_btn = gtk.Button(label="+ Create New Repo")
         try:
-            add_repo_btn.get_style_context().add_class("add-store")
-            create_new_btn.get_style_context().add_class("add-store")
+            self.add_repo_btn.get_style_context().add_class("add-store")
+            self.create_new_btn.get_style_context().add_class("add-store")
         except Exception:
             pass
-        repo_header.pack_start(add_repo_btn, False, False, 0)
-        repo_header.pack_start(create_new_btn, False, False, 0)
+        repo_header.pack_start(self.add_repo_btn, False, False, 0)
+        repo_header.pack_start(self.create_new_btn, False, False, 0)
         page2.pack_start(repo_header, False, False, 0)
 
         repo_scrolled = gtk.ScrolledWindow()
@@ -430,6 +432,22 @@ class MainWindow(gtk.Window):
         page2.pack_start(repo_scrolled, True, True, 0)
 
         notebook.append_page(page2, gtk.Label(label="Repositories"))
+        self.repos_page = page2
+
+        # refresh lists when the user switches tabs
+        def _on_switch(nb, page, page_num):
+            try:
+                if page is self.stores_page:
+                    self.populate_stores()
+                elif page is self.repos_page:
+                    self.populate_repos()
+            except Exception:
+                pass
+
+        try:
+            notebook.connect("switch-page", _on_switch)
+        except Exception:
+            pass
 
         # Settings tab (placeholder)
         page3 = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
@@ -442,8 +460,8 @@ class MainWindow(gtk.Window):
         self.stores_listbox.connect("row-selected", self.on_row_selected)
         # repo signals
         try:
-            add_repo_btn.connect("clicked", self.on_add_repo_clicked)
-            create_new_btn.connect("clicked", self.on_create_new_repo_clicked)
+            self.add_repo_btn.connect("clicked", self.on_add_repo_clicked)
+            self.create_new_btn.connect("clicked", self.on_create_new_repo_clicked)
         except Exception:
             pass
 
@@ -453,6 +471,28 @@ class MainWindow(gtk.Window):
         # initial population
         self.populate_stores()
         self.populate_repos()
+        # ensure repo action buttons reflect current selection
+        try:
+            self._update_repo_buttons_state()
+        except Exception:
+            pass
+
+    def _update_repo_buttons_state(self):
+        """Enable or disable repository action buttons depending on active store."""
+        try:
+            cfg = core.get_current_config()
+            store = core._get_store_by_id(getattr(cfg, "current_store_id", None))
+            enabled = bool(store and getattr(store, "is_active", True))
+        except Exception:
+            enabled = False
+        try:
+            self.add_repo_btn.set_sensitive(enabled)
+        except Exception:
+            pass
+        try:
+            self.create_new_btn.set_sensitive(enabled)
+        except Exception:
+            pass
 
     # Dialog to add/edit stores
     def _open_store_dialog(self, title: str, initial: dict | None = None) -> tuple | None:
@@ -622,6 +662,10 @@ class MainWindow(gtk.Window):
                 self.selected_store_label.set_text('No store selected')
 
         self.stores_listbox.show_all()
+        try:
+            self._update_repo_buttons_state()
+        except Exception:
+            pass
 
     def populate_repos(self) -> None:
         # clear existing repo rows
@@ -680,6 +724,10 @@ class MainWindow(gtk.Window):
         # refresh repos when the selected store changes
         try:
             self.populate_repos()
+        except Exception:
+            pass
+        try:
+            self._update_repo_buttons_state()
         except Exception:
             pass
 
