@@ -6,8 +6,9 @@ from silly_engine.router import Router, RouterError
 from core import (
     list_stores, add_store, select_store_by_name, delete_store_by_name, select_store_by_id,
     get_current_config,
-    add_repo_to_store, add_and_create_repo, list_repos_in_current_store
+    add_repo_to_store, add_and_create_repo, list_repos_in_current_store, get_repo_by_name
 )
+from git_parser import list_branches, list_commits
 from models import Store
 
 
@@ -73,7 +74,6 @@ def cli_repo_add(name: str) -> None:
     res = add_repo_to_store(name)
     print_res(res)
 
-
 def cli_create_and_add_repo(name: str) -> None:
     res = add_and_create_repo(name)
     print_res(res)
@@ -91,6 +91,28 @@ def cli_list_repos_in_current_store(**kwargs) -> None:
         if tip:
             print(f"git remote add local {repo.path}")
 
+def cli_list_branches(repo_name: str, branch_name: str | None = None) -> None:
+    repo = get_repo_by_name(repo_name)
+    if repo is None:
+        print(f"Repo with name '{repo_name}' not found in the current store")
+        return
+    if branch_name:
+        commits = list_commits(repo.path, branch_name)
+        if not commits:
+            print("No commits found or branch not found")
+            return
+        print(f"Commits in branch '{branch_name}' of repo '{repo.name}':")
+        for c in commits:
+            print(f"- {c['sha'][:7]} {c['author']} {c['date']} {c['subject']}")
+        return
+
+    branches = list_branches(repo.path)
+    if not branches:
+        print("No branches found")
+        return
+    print(f"Branches in repo '{repo.name}':")
+    for branch in branches:
+        print(f"- {branch['name']}: {branch['sha']} ({branch['type']})")
 
 # ----------------------------------------------------------------
 # MAIN CLI
@@ -109,6 +131,9 @@ if __name__ == "__main__":
         ("repo add <name>", cli_repo_add, "Add a new repo to the current store"),
         ("repo create <name>", cli_create_and_add_repo, "Add a new repo to the current store and create it on the filesystem"),
         ("repo ls", cli_list_repos_in_current_store, "List all repos in the current store, ?tip to show git remote add command"),
+        "\n# Branches and commits commands:",
+        ("branch <repo_name>", cli_list_branches, "List all branches in a repo"),
+        ("branch <repo_name> <branch_name>", cli_list_branches, "List commits of a branch in a repo"),
         "\n# Config commands:",
         ("config", cli_show_config, "Show current configuration"),
     ])

@@ -4,13 +4,16 @@
 import os
 from pathlib import Path
 import gi
+import subprocess
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk as gtk
 from gi.repository import Gdk as gdk
 from gi.repository import GLib
+from git_parser import list_branches, list_commits
 
 import core
+from models import Store, Repo
 
 
 CSS = b"""
@@ -30,7 +33,7 @@ CSS = b"""
   padding: 4px 8px;
 }
 .repo-row {
-  border: 2px solid #dcdcdc;
+    border: 2px solid #dcdcdc;
   border-radius: 6px;
   margin: 4px;
   padding: 6px;
@@ -38,7 +41,27 @@ CSS = b"""
 .repo-row.selected {
   border: 2px solid #2ecc71;
 }
+.button {
+    margin-left: 10px;
+    margin-top: 10px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+.detail-pane {
+    margin: 5px;
+}
 """
+
+
+def add_button_class(btn):
+        """Add the 'button' CSS class to a Gtk.Button if possible."""
+        try:
+                if btn is None:
+                        return
+                sc = btn.get_style_context()
+                sc.add_class("button")
+        except Exception:
+                pass
 
 
 class RepoGui:
@@ -68,9 +91,11 @@ class RepoGui:
         name_label = gtk.Label(label=f"{prefix}- {repo.name}", xalign=0)
         path_label = gtk.Label(label=getattr(repo, "path", ""), xalign=0)
         try:
-            tip_label = gtk.Label(label=f"Add remote to your project:\ngit remote add local {repo.path}\n", xalign=0)
+            tip_title_label = gtk.Label(label="Add remote to your project:", xalign=0)
+            tip_label = gtk.Label(label=f"git remote add local {repo.path}", xalign=0)
             tip_label.set_selectable(True)
         except Exception:
+            tip_title_label = None
             tip_label = None
         name_label.set_xalign(0)
         path_label.set_xalign(0)
@@ -84,7 +109,11 @@ class RepoGui:
 
         btn_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
         edit_btn = gtk.Button(label="Edit")
+        # add_button_class(edit_btn)
+        detail_btn = gtk.Button(label="Detail")
+        # add_button_class(detail_btn)
         del_btn = gtk.Button(label="X")
+        # add_button_class(del_btn)
         try:
             del_btn.get_style_context().add_class("destructive-action")
         except Exception:
@@ -96,6 +125,7 @@ class RepoGui:
         except Exception:
             pass
         btn_box.pack_start(edit_btn, False, False, 0)
+        btn_box.pack_start(detail_btn, False, False, 0)
         btn_box.pack_start(del_btn, False, False, 0)
 
         hbox.pack_start(left_v, True, True, 0)
@@ -107,6 +137,7 @@ class RepoGui:
         desc_text = getattr(repo, 'description', '') or ''
         desc_label = gtk.Label(label=desc_text, xalign=0)
         desc_label.set_xalign(0)
+        outer.pack_start(tip_title_label, False, False, 0)
         outer.pack_start(tip_label, False, False, 0)
         outer.pack_start(desc_label, False, False, 0)
 
@@ -115,6 +146,45 @@ class RepoGui:
 
         edit_btn.connect("clicked", self.on_edit_clicked)
         del_btn.connect("clicked", self.on_delete_clicked)
+        try:
+            detail_btn.connect("clicked", self.on_detail_clicked)
+        except Exception:
+            pass
+
+    def on_detail_clicked(self, _btn):
+        """Show branches for this repo in the main window's right pane."""
+        # remember this repo as the last one shown even if it's not a valid git repo
+        try:
+            self.parent._last_repo_in_detail = self.repo
+        except Exception:
+            pass
+        try:
+            self.parent.set_selected_repo(getattr(self.repo, "_id", None))
+        except Exception:
+            pass
+
+        try:
+            branches = list_branches(self.repo.path)
+        except Exception as e:
+            try:
+                # show error in detail pane instead of modal
+                self.parent.show_detail_message(f"Error listing branches: {e}")
+            except Exception:
+                pass
+            return
+        try:
+            # delegate rendering to the main window
+            self.parent.show_repo_branches(self.repo, branches)
+            try:
+                # update visual selection: highlight this repo and clear others
+                self.parent.set_selected_repo(getattr(self.repo, "_id", None))
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                self.parent.show_detail_message(f"Error showing branch details: {e}")
+            except Exception:
+                pass
 
     def on_edit_clicked(self, _btn):
         # Inline dialog to edit repo name and description
@@ -199,7 +269,7 @@ class RepoGui:
             core.Repos.delete(repo._id)
             # Remove reference from store
             try:
-                store = core._get_store_by_id(getattr(repo, "store_id", None))
+                store: Store = core._get_store_by_id(getattr(repo, "store_id", None))  # type: ignore
                 if store and getattr(store, "repos_ids", None) and repo._id in store.repos_ids:
                     store.repos_ids.remove(repo._id)
                     core.Stores.update(store)
@@ -254,8 +324,24 @@ class StoreGui:
         left_v.pack_start(path_label, False, False, 0)
 
         btn_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
+        # Open-folder button (shows store folder in file manager)
+        folder_btn = gtk.Button()
+        # add_button_class(folder_btn)
+        try:
+            img = gtk.Image.new_from_icon_name("folder", gtk.IconSize.BUTTON)
+            folder_btn.add(img)
+        except Exception:
+            folder_btn.set_label("Open")
+        # disable if store is not active
+        try:
+            folder_btn.set_sensitive(bool(getattr(store, "is_active", True)))
+        except Exception:
+            pass
+
         edit_btn = gtk.Button(label="Edit")
+        # add_button_class(edit_btn)
         del_btn = gtk.Button(label="X")
+        # add_button_class(del_btn)
         try:
             del_btn.get_style_context().add_class("destructive-action")
         except Exception:
@@ -266,6 +352,7 @@ class StoreGui:
             del_btn.set_size_request(60, 24)
         except Exception:
             pass
+        btn_box.pack_start(folder_btn, False, False, 0)
         btn_box.pack_start(edit_btn, False, False, 0)
         btn_box.pack_start(del_btn, False, False, 0)
 
@@ -290,8 +377,31 @@ class StoreGui:
         self.row.store = store
         self.row.add(outer)
 
+        try:
+            folder_btn.connect("clicked", self.on_open_store_folder_clicked)
+        except Exception:
+            pass
         edit_btn.connect("clicked", self.on_edit_clicked)
         del_btn.connect("clicked", self.on_delete_clicked)
+
+    def on_open_store_folder_clicked(self, _btn):
+        """Open the store folder in the system file manager using xdg-open."""
+        try:
+            p = Path(self.store.path).expanduser()
+            if not p.exists() or not p.is_dir():
+                md = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Path '{p}' is not an existing directory")
+                md.run()
+                md.destroy()
+                return
+            # Best-effort: use xdg-open to open folder on Linux
+            try:
+                subprocess.Popen(["xdg-open", str(p)])
+            except Exception as e:
+                md = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Error opening folder: {e}")
+                md.run()
+                md.destroy()
+        except Exception:
+            pass
 
     def on_delete_clicked(self, button):
         md = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.QUESTION, gtk.ButtonsType.YES_NO, f"Delete store '{self.store.name}'?")
@@ -351,7 +461,7 @@ class MainWindow(gtk.Window):
     def __init__(self):
         super().__init__()
         self.set_title("Local Git Manager")
-        self.set_default_size(900, 600)
+        self.set_default_size(800, 600)
         try:
             self.set_default_icon_from_file("icon_git.png")
         except Exception:
@@ -366,8 +476,27 @@ class MainWindow(gtk.Window):
         except Exception:
             pass
 
-        notebook = gtk.Notebook()
-        self.add(notebook)
+        # Use a Stack with a StackSwitcher for animated tab transitions
+        stack = gtk.Stack()
+        stack.set_transition_type(gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        stack.set_transition_duration(250)
+
+        switcher = gtk.StackSwitcher()
+        switcher.set_stack(stack)
+
+        container = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
+        # center the StackSwitcher by placing flexible spacers on both sides
+        switcher_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=0)
+        left_spacer = gtk.Box()
+        left_spacer.set_hexpand(True)
+        right_spacer = gtk.Box()
+        right_spacer.set_hexpand(True)
+        switcher_box.pack_start(left_spacer, True, True, 0)
+        switcher_box.pack_start(switcher, False, False, 0)
+        switcher_box.pack_start(right_spacer, True, True, 0)
+        container.pack_start(switcher_box, False, False, 0)
+        container.pack_start(stack, True, True, 0)
+        self.add(container)
 
         # Stores tab
         page1 = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
@@ -377,6 +506,7 @@ class MainWindow(gtk.Window):
         header.set_margin_bottom(8)
 
         add_btn = gtk.Button(label="+ Add Store")
+        add_button_class(add_btn)
         try:
             add_btn.get_style_context().add_class("add-store")
         except Exception:
@@ -399,7 +529,7 @@ class MainWindow(gtk.Window):
         scrolled.add(self.stores_listbox)
         page1.pack_start(scrolled, True, True, 0)
 
-        notebook.append_page(page1, gtk.Label(label="Stores"))
+        stack.add_titled(page1, "stores", "Stores")
         # keep references to pages so we can refresh when the user switches tabs
         self.stores_page = page1
 
@@ -412,6 +542,8 @@ class MainWindow(gtk.Window):
 
         self.add_repo_btn = gtk.Button(label="+ Add Repo")
         self.create_new_btn = gtk.Button(label="+ Create New Repo")
+        add_button_class(self.add_repo_btn)
+        add_button_class(self.create_new_btn)
         try:
             self.add_repo_btn.get_style_context().add_class("add-store")
             self.create_new_btn.get_style_context().add_class("add-store")
@@ -427,33 +559,56 @@ class MainWindow(gtk.Window):
         repo_scrolled.set_vexpand(True)
 
         self.repos_listbox = gtk.ListBox()
+        # repos should not be selectable: details are shown via the Detail button
         self.repos_listbox.set_selection_mode(gtk.SelectionMode.NONE)
         repo_scrolled.add(self.repos_listbox)
-        page2.pack_start(repo_scrolled, True, True, 0)
+        # selection of a repo row is not used; details are shown via the 'Detail' button
 
-        notebook.append_page(page2, gtk.Label(label="Repositories"))
+        # Split the repositories page in two columns using a Paned so the right
+        # pane already occupies space even when empty.
+        repo_paned = gtk.Paned(orientation=gtk.Orientation.HORIZONTAL)
+
+        # Left: the existing scrollable list of repos
+        repo_paned.pack1(repo_scrolled, resize=True, shrink=False)
+
+        # Right: placeholder VBox for future repository details/actions
+        self.repos_detail_vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
+        self.repos_detail_vbox.set_hexpand(True)
+        self.repos_detail_vbox.set_vexpand(True)
+        try:
+            self.repos_detail_vbox.get_style_context().add_class("detail-pane")
+        except Exception:
+            pass
+        repo_paned.pack2(self.repos_detail_vbox, resize=True, shrink=False)
+
+        # set initial divider position to half of default window width (window default 900)
+        try:
+            repo_paned.set_position(450)
+        except Exception:
+            pass
+
+        page2.pack_start(repo_paned, True, True, 0)
+
+        stack.add_titled(page2, "repositories", "Repositories")
         self.repos_page = page2
 
-        # refresh lists when the user switches tabs
-        def _on_switch(nb, page, page_num):
+        # refresh lists when the user switches tabs (Stack uses notify on visible-child)
+        def _on_switch(stk, pspec):
             try:
-                if page is self.stores_page:
+                visible = stk.get_visible_child()
+                if visible is self.stores_page:
                     self.populate_stores()
-                elif page is self.repos_page:
+                elif visible is self.repos_page:
                     self.populate_repos()
             except Exception:
                 pass
 
         try:
-            notebook.connect("switch-page", _on_switch)
+            stack.connect("notify::visible-child", _on_switch)
         except Exception:
             pass
 
-        # Settings tab (placeholder)
-        page3 = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
-        label3 = gtk.Label(label="Contenu de l'onglet 3")
-        page3.pack_start(label3, True, True, 0)
-        notebook.append_page(page3, gtk.Label(label="Settings"))
+        # Settings tab removed — not needed
 
         # Signals
         add_btn.connect("clicked", self.on_add_store_clicked)
@@ -481,7 +636,7 @@ class MainWindow(gtk.Window):
         """Enable or disable repository action buttons depending on active store."""
         try:
             cfg = core.get_current_config()
-            store = core._get_store_by_id(getattr(cfg, "current_store_id", None))
+            store: Store = core._get_store_by_id(getattr(cfg, "current_store_id", None))  # type: ignore
             enabled = bool(store and getattr(store, "is_active", True))
         except Exception:
             enabled = False
@@ -509,6 +664,7 @@ class MainWindow(gtk.Window):
         path_label = gtk.Label(label="Path:", xalign=0)
         path_entry = gtk.Entry()
         folder_btn = gtk.Button()
+        add_button_class(folder_btn)
         try:
             img = gtk.Image.new_from_icon_name("folder", gtk.IconSize.BUTTON)
             folder_btn.add(img)
@@ -696,6 +852,19 @@ class MainWindow(gtk.Window):
                 self.repos_listbox.add(row)
 
         self.repos_listbox.show_all()
+        # If a repo details pane is currently visible, reapply the
+        # selected highlight to keep the previously shown repo green
+        # when the user switches tabs and comes back.
+        try:
+            # details pane has children when details are shown
+            children = self.repos_detail_vbox.get_children()
+            if hasattr(self, '_last_repo_in_detail') and getattr(self, '_last_repo_in_detail', None) and children:
+                try:
+                    self.set_selected_repo(getattr(self._last_repo_in_detail, "_id", None))
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def on_add_store_clicked(self, _button):
         res = self.open_store_dialog("Add Store")
@@ -730,6 +899,303 @@ class MainWindow(gtk.Window):
             self._update_repo_buttons_state()
         except Exception:
             pass
+
+    def on_repo_row_selected(self, _lb, row):
+        """When a repository row is selected, populate the right pane with branches."""
+        if row is None:
+            # clear details
+            try:
+                for child in self.repos_detail_vbox.get_children():
+                    self.repos_detail_vbox.remove(child)
+            except Exception:
+                pass
+            return
+        repo = getattr(row, "repo", None)
+        if repo is None:
+            return
+        branches = []
+        try:
+            branches = list_branches(repo.path)
+        except Exception as e:
+            # show diagnostic error in the detail pane instead of a modal dialog
+            try:
+                self.show_detail_message(f"Error listing branches: {e}")
+            except Exception:
+                pass
+            return
+
+        # if no branches found, provide diagnostic info to help locate the issue
+        if not branches:
+            try:
+                p = Path(getattr(repo, 'path', ''))
+                exists = p.exists()
+                dotgit = (p / '.git').exists()
+                objects = (p / 'objects').exists()
+                info_txt = (
+                    f"No branches found for repo '{getattr(repo,'name','')}'\n"
+                    f"path: {p}\nexists: {exists}\n.git present: {dotgit}\nobjects present: {objects}"
+                )
+                # render diagnostic info in the detail pane
+                try:
+                    self.show_detail_message(info_txt)
+                except Exception:
+                    pass
+                return
+            except Exception:
+                pass
+
+        self.show_repo_branches(repo, branches)
+
+    def show_repo_branches(self, repo, branches: list) -> None:
+        """Render a selectable list of branches for `repo` into the right pane."""
+        # clear previous
+        for child in self.repos_detail_vbox.get_children():
+            self.repos_detail_vbox.remove(child)
+
+        # remember current repo for commits lookup
+        self._last_repo_in_detail = repo
+        try:
+            # visually mark this repo as selected (green border) and clear others
+            try:
+                self.set_selected_repo(getattr(repo, "_id", None))
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        title = gtk.Label()
+        try:
+            title.set_markup(f"<b>Branches for {GLib.markup_escape_text(repo.name)}</b>")
+        except Exception:
+            title.set_text(f"Branches for {getattr(repo, 'name', '')}")
+        title.set_xalign(0)
+        self.repos_detail_vbox.pack_start(title, False, False, 4)
+
+        # Dropdown for branches
+        if not branches:
+            lbl = gtk.Label(label="No branches found", xalign=0)
+            lbl.set_xalign(0)
+            self.repos_detail_vbox.pack_start(lbl, False, False, 2)
+            self.repos_detail_vbox.show_all()
+            return
+
+        combo = gtk.ComboBoxText()
+        # keep the branch objects so we can access sha/ref by index
+        self._last_branch_list = list(branches)
+        for b in self._last_branch_list:
+            name = b.get("name")
+            current = b.get("current", False)
+            label = f"{name}"
+            combo.append_text(label)
+        try:
+            combo.set_active(0)
+        except Exception:
+            pass
+        try:
+            combo.connect("changed", self.on_branch_combo_changed)
+        except Exception:
+            pass
+
+        self.repos_detail_vbox.pack_start(combo, False, False, 2)
+
+        # selectable label to show the SHA of the selected branch
+        sha_label = gtk.Label(label="", xalign=0)
+        try:
+            sha_label.set_selectable(True)
+        except Exception:
+            pass
+        sha_label.set_xalign(0)
+        self.repos_detail_sha_label = sha_label
+        self.repos_detail_vbox.pack_start(sha_label, False, False, 2)
+
+        # horizontal separator
+        sep = gtk.Separator(orientation=gtk.Orientation.HORIZONTAL)
+        self.repos_detail_vbox.pack_start(sep, False, True, 6)
+
+        # commits area (will be populated by update_commits_area)
+        self.repos_detail_commits_scrolled = gtk.ScrolledWindow()
+        self.repos_detail_commits_scrolled.set_policy(gtk.PolicyType.AUTOMATIC, gtk.PolicyType.AUTOMATIC)
+        self.repos_detail_commits_scrolled.set_hexpand(True)
+        self.repos_detail_commits_scrolled.set_vexpand(True)
+        # placeholder box inside scrolled window
+        self._commits_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=4)
+        self.repos_detail_commits_scrolled.add(self._commits_box)
+        self.repos_detail_vbox.pack_start(self.repos_detail_commits_scrolled, True, True, 2)
+
+        # initialize sha label and commits with first branch
+        try:
+            active = combo.get_active()
+            if active is not None and active >= 0:
+                b0 = self._last_branch_list[active]
+                self.repos_detail_sha_label.set_text(b0.get("sha", ""))
+                # show commits for the initial branch
+                try:
+                    self.update_commits_area(repo, b0.get("ref"))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self.repos_detail_vbox.show_all()
+
+    def show_detail_message(self, text: str) -> None:
+        """Render a simple informational message into the right detail pane.
+
+        This replaces any existing details content.
+        """
+        try:
+            for child in self.repos_detail_vbox.get_children():
+                self.repos_detail_vbox.remove(child)
+        except Exception:
+            pass
+        try:
+            lbl = gtk.Label()
+            # use simple markup-safe text
+            esc = GLib.markup_escape_text(text)
+            lbl.set_markup(f"<span>{esc}</span>")
+            lbl.set_xalign(0)
+            lbl.set_line_wrap(True)
+            self.repos_detail_vbox.pack_start(lbl, False, False, 4)
+            self.repos_detail_vbox.show_all()
+        except Exception:
+            pass
+
+    def on_branch_selected(self, lb, row):
+        """Handle branch selection in the right pane. For now, just show basic info below."""
+        # remove any existing info box below the list
+        try:
+            # keep title and scrolled list (first two children), remove others
+            children = self.repos_detail_vbox.get_children()
+            # if there are more than 2 children, remove from index 2 onwards
+            for child in children[2:]:
+                self.repos_detail_vbox.remove(child)
+        except Exception:
+            pass
+
+        if row is None:
+            return
+        ref = getattr(row, "branch_ref", None)
+        name = getattr(row, "branch_name", "")
+        info = gtk.Label(label=f"Selected branch: {name}\nRef: {ref}", xalign=0)
+        info.set_xalign(0)
+        info.set_line_wrap(True)
+        self.repos_detail_vbox.pack_start(info, False, False, 4)
+        self.repos_detail_vbox.show_all()
+
+    def set_selected_repo(self, repo_id: str | None) -> None:
+        """Visually mark the repo with `repo_id` as selected (green border) and clear others.
+
+        This toggles the 'selected' CSS class on the repo rows' outer container.
+        """
+        try:
+            for row in self.repos_listbox.get_children():
+                try:
+                    r = getattr(row, "repo", None)
+                    child = row.get_child()
+                    if child is None:
+                        continue
+                    sc = child.get_style_context()
+                    if r is not None and getattr(r, "_id", None) == repo_id:
+                        # add selected class
+                        sc.add_class("selected")
+                    else:
+                        # remove selected class if present
+                        try:
+                            sc.remove_class("selected")
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def on_branch_combo_changed(self, combo):
+        """Update SHA label when branch dropdown selection changes."""
+        try:
+            idx = combo.get_active()
+            if idx is None or idx < 0:
+                return
+            b = self._last_branch_list[idx]
+            sha = b.get("sha", "")
+            try:
+                self.repos_detail_sha_label.set_text(sha)
+            except Exception:
+                pass
+            # update commits area for the selected branch
+            try:
+                self.update_commits_area(self._last_repo_in_detail, b.get("ref"))
+            except Exception:
+                try:
+                    # fallback: if update_commits_area needs repo, try to read repo from title
+                    pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def update_commits_area(self, repo, branch_ref: str | None) -> None:
+        """Populate the commits scrolled area for given branch_ref.
+
+        `repo` may be None if not needed by list_commits (we derive path from stored _last_repo_path).
+        """
+        try:
+            # clear previous commits
+            for child in self._commits_box.get_children():
+                self._commits_box.remove(child)
+        except Exception:
+            pass
+
+        if branch_ref is None:
+            return
+
+        # determine repo path: try passed repo, else try the last branch list's repo path stored earlier
+        repo_path = None
+        try:
+            if repo is not None:
+                repo_path = repo.path
+            else:
+                # attempt to use the first repo in list if available (best-effort)
+                if hasattr(self, '_last_branch_list') and self._last_branch_list:
+                    # no repo path available here; caller should pass repo
+                    repo_path = None
+        except Exception:
+            repo_path = None
+
+        if repo_path is None:
+            # cannot fetch commits without a repo path
+            lbl = gtk.Label(label="Commits unavailable: missing repo path", xalign=0)
+            lbl.set_xalign(0)
+            self._commits_box.pack_start(lbl, False, False, 2)
+            self.repos_detail_vbox.show_all()
+            return
+
+        commits = []
+        try:
+            commits = list_commits(repo_path, branch_ref, max_count=200)
+        except Exception:
+            commits = []
+
+        if not commits:
+            lbl = gtk.Label(label="No commits found", xalign=0)
+            lbl.set_xalign(0)
+            self._commits_box.pack_start(lbl, False, False, 2)
+            self.repos_detail_vbox.show_all()
+            return
+        label_commit_title = gtk.Label(label="Recent commits:", xalign=0)
+        self._commits_box.pack_start(label_commit_title, False, False, 2)
+        for c in commits:
+            sha = c.get('sha', '')
+            author = c.get('author', '')
+            date = c.get('date', '')
+            subject = c.get('subject', '')
+            lbl = gtk.Label(label=f"{sha}\n{author} {date}\n{subject}\n", xalign=0)
+            try:
+                lbl.set_selectable(True)
+            except Exception:
+                pass
+            lbl.set_xalign(0)
+            self._commits_box.pack_start(lbl, False, False, 2)
+
+        self.repos_detail_vbox.show_all()
 
     def on_add_repo_clicked(self, _button):
         # Present a dialog showing direct subfolders of the active store for selection

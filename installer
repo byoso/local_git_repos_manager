@@ -72,13 +72,13 @@ exec_options = ""  # if the exec needs additional options
 # if more parameters are needed in the .desktop file, fill this list
 # with the lines you want. e.g: ["foo=bar", "truc=machin"]
 options = [
-    "Keywords=geninstaller,git;",
+    "Keywords=geninstaller,git,local;",
 ]
 
 # optional pre installation/uninstallation script files (e.g. "scripts/pre_install.sh")
 pre_install_script = ""
 post_install_script = ""
-pre_uninstall_script = ""
+pre_uninstall_script = "installation/pre_uninstall.sh"
 
 # you're done ! :)
 

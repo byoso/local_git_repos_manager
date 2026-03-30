@@ -7,7 +7,9 @@ from silly_engine.jsondb import JsonDb
 
 def get_db() -> JsonDb:
     db = JsonDb(
-        "localGit.json",
+        Path(
+            "~/.local/share/geninstaller-applications/.data/LocalGitManager/localGit.json"
+            ).expanduser().resolve(),
         autosave=True,
         )
     return db

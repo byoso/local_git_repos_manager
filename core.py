@@ -170,3 +170,13 @@ def list_repos_in_current_store() -> list[Repo]:
     store_id = config.current_store_id
     repos: list[Repo] = Repos.filter(lambda k: k["store_id"] == store_id)  # type: ignore
     return repos
+
+def get_repo_by_name(name: str) -> Repo | None:
+    config = get_current_config()
+    store_id = config.current_store_id
+    repos = Repos.filter(lambda k: k["name"] == name and k["store_id"] == store_id)
+    if not repos:
+        return None
+    repo = repos[0]
+    assert isinstance(repo, Repo)
+    return repo

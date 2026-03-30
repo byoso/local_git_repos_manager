@@ -1,7 +1,8 @@
 #! /usr/bin/env python3
 
 """
-file version: 1.0.1
+file version:
+- 1.0.2: better help display for long routes
 A router for command line applications
 """
 
@@ -15,24 +16,34 @@ def text_chunks(s: str, size: int) -> list[str]:
 
 
 def _formatting_incoming_route_width(incoming_route, width) -> str:
-    if len(str(incoming_route[0])) < width // 3:
-        left = width // 3
-    elif len(str(incoming_route[0])) < width // 2:
-        left = width // 2
-    else:
-        left = len(str(incoming_route[0])) + 2
-    total_left = left + 6
-    rest_right = width - total_left
+    route_text = str(incoming_route[0])
     display_right = str(incoming_route[2])
-    raw_chunks = text_chunks(display_right, rest_right)
-    display_chunks = []
-    for chunk in raw_chunks:
-        if chunk != raw_chunks[-1]:
-            display_chunks.append(chunk + "\n" + " " * total_left)
-        else:
-            display_chunks.append(chunk)
 
-    display = f"- {str(incoming_route[0]):<{left}} -> " + "".join(display_chunks)
+    # Determine left column width (where route is printed). Use one-third
+    # of the total width as the standard column. Descriptions start at
+    # column (left + 6). If a route is longer than the left column, print
+    # the route on its own line and put the description on the next line
+    # aligned with other descriptions.
+    left = max(10, width // 3)
+    total_left = left + 6
+    rest_right = max(10, width - total_left)
+
+    raw_chunks = text_chunks(display_right, rest_right)
+    # prepare joined description with proper indentation between wrapped lines
+    if raw_chunks:
+        desc_joined = ("\n" + " " * total_left).join(raw_chunks)
+    else:
+        desc_joined = ""
+
+    if len(route_text) <= left:
+        # route fits in the left column: show inline
+        display = f"- {route_text:<{left}} -> {desc_joined}"
+    else:
+        # route too long: print route on its own line, then description aligned
+        # place the arrow where it would normally be: prefix spaces = 2 + left,
+        # then ' -> ' and the first chunk; wrapped lines keep total_left indentation
+        display = f"- {route_text}\n" + " " * (2 + left) + " -> " + desc_joined
+
     return display
 
 
