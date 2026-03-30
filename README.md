@@ -1,3 +1,4 @@
-# WIP...
+# Local Git Manager
 
-A tool to use git locally as a personnal github, with a usb key or an external disk as remote storage
+This tool allows you tu use a folder, USB key, or external drive as a local github/gitlab.
+You can create and manage repositories, see the branches and commits.
