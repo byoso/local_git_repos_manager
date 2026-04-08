@@ -6,7 +6,8 @@ Data validation module
 """
 from abc import ABC
 from dataclasses import dataclass, fields, field, MISSING
-from typing import Any, get_origin, get_args, List, Dict
+from types import UnionType
+from typing import Any, get_origin, get_args, List, Dict, Union
 
 class DataValidationError(Exception):
     pass
@@ -19,17 +20,6 @@ def _check_generic(value: Any, field_type: Any, field_name: str = "<unknown>") -
 
     # Any : no check
     if field_type is Any:
-        return value
-
-    # Simple cases : str, int, bool, float
-    if isinstance(field_type, type):
-        if not isinstance(value, field_type):
-            if field_type is bool:
-                if isinstance(value, int):
-                    return bool(value)
-            raise DataValidationError(
-                f"Field '{field_name}' expects {field_type.__name__}, got {value!r} ({type(value).__name__})"
-            )
         return value
 
     # List[T]
@@ -45,6 +35,29 @@ def _check_generic(value: Any, field_type: Any, field_name: str = "<unknown>") -
         if not isinstance(value, dict):
             raise DataValidationError(f"Field '{field_name}' expects a dict, got {value!r}")
         return {_check_generic(k, key_type, field_name): _check_generic(v, val_type, field_name) for k, v in value.items()}
+
+    # Union / Optional[T]
+    if origin in (Union, UnionType):
+        last_error = None
+        for inner_type in args:
+            try:
+                return _check_generic(value, inner_type, field_name)
+            except DataValidationError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        return value
+
+    # Simple cases : str, int, bool, float
+    if isinstance(field_type, type):
+        if not isinstance(value, field_type):
+            if field_type is bool:
+                if isinstance(value, int):
+                    return bool(value)
+            raise DataValidationError(
+                f"Field '{field_name}' expects {field_type.__name__}, got {value!r} ({type(value).__name__})"
+            )
+        return value
 
     # If type is unknown
     return value
