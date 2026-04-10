@@ -87,6 +87,7 @@ class RepoGui:
         prefix = "✅" if getattr(repo, "is_active", True) else "❌"
         name_label = gtk.Label(label=f"{prefix}- {repo.name}", xalign=0)
         name_label.set_xalign(0)
+        name_label.set_line_wrap(True)
         left_v.pack_start(name_label, False, False, 0)
 
         hbox.pack_start(left_v, True, True, 0)
@@ -97,6 +98,7 @@ class RepoGui:
         desc_text = getattr(repo, 'description', '') or ''
         desc_label = gtk.Label(label=desc_text, xalign=0)
         desc_label.set_xalign(0)
+        desc_label.set_line_wrap(True)
         outer.pack_start(desc_label, False, False, 0)
 
         self.row.repo = repo
@@ -380,6 +382,7 @@ class MainWindow(gtk.Window):
         # Split the repositories page in two columns using a Paned so the right
         # pane already occupies space even when empty.
         repo_paned = gtk.Paned(orientation=gtk.Orientation.HORIZONTAL)
+        self.repo_paned = repo_paned
 
         # Left: the existing scrollable list of repos
         repo_paned.pack1(repo_scrolled, resize=True, shrink=False)
@@ -419,9 +422,11 @@ class MainWindow(gtk.Window):
 
         repo_paned.pack2(self.repos_detail_vbox, resize=True, shrink=False)
 
-        # set initial divider position to half of default window width (window default 900)
+        # keep a fixed 1/3 (left) - 2/3 (right) layout for repositories pane.
         try:
-            repo_paned.set_position(450)
+            repo_paned.connect("size-allocate", self._on_repo_paned_size_allocate)
+            repo_paned.connect("notify::position", self._on_repo_paned_position_changed)
+            GLib.idle_add(self._update_repo_paned_position)
         except Exception:
             pass
 
@@ -509,6 +514,29 @@ class MainWindow(gtk.Window):
                     self.repos_detail_vbox.remove(child)
         except Exception:
             pass
+
+    def _update_repo_paned_position(self, *_args):
+        """Force repositories split to 1/3 left and 2/3 right."""
+        try:
+            width = self.repo_paned.get_allocated_width()
+            if width <= 0:
+                width = self.get_allocated_width()
+            if width <= 0:
+                return False
+            target = max(1, int(width / 3))
+            if abs(self.repo_paned.get_position() - target) > 1:
+                self.repo_paned.set_position(target)
+        except Exception:
+            pass
+        return False
+
+    def _on_repo_paned_size_allocate(self, _widget, _allocation):
+        """Reapply fixed repositories split when pane size changes."""
+        self._update_repo_paned_position()
+
+    def _on_repo_paned_position_changed(self, _widget, _pspec):
+        """Prevent manual divider drift from fixed 1/3-2/3 split."""
+        self._update_repo_paned_position()
 
     # Dialog to add/edit stores
     def _open_store_dialog(self, title: str, initial: dict | None = None) -> tuple | None:
@@ -856,6 +884,7 @@ class MainWindow(gtk.Window):
         except Exception:
             title.set_text(f"Branches for {getattr(repo, 'name', '')}")
         title.set_xalign(0)
+        title.set_line_wrap(True)
         self.repos_detail_vbox.pack_start(title, False, False, 4)
 
         # Dropdown for branches
@@ -936,6 +965,9 @@ class MainWindow(gtk.Window):
         path_label.set_xalign(0)
         helper_label.set_xalign(0)
         cmd_label.set_xalign(0)
+        path_label.set_line_wrap(True)
+        helper_label.set_line_wrap(True)
+        cmd_label.set_line_wrap(True)
         try:
             path_label.set_selectable(True)
             cmd_label.set_selectable(True)
