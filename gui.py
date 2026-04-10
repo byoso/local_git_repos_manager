@@ -65,7 +65,7 @@ def add_button_class(btn):
 
 
 class RepoGui:
-    """Represents a single repository row in the ListBox with Edit/Delete actions.
+    """Represents a single repository row in the ListBox with a Detail action.
 
     Each instance creates a `ListBoxRow` stored in `self.row`.
     """
@@ -108,25 +108,8 @@ class RepoGui:
         left_v.pack_start(path_label, False, False, 0)
 
         btn_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
-        edit_btn = gtk.Button(label="Edit")
-        # add_button_class(edit_btn)
         detail_btn = gtk.Button(label="Detail")
-        # add_button_class(detail_btn)
-        del_btn = gtk.Button(label="X")
-        # add_button_class(del_btn)
-        try:
-            del_btn.get_style_context().add_class("destructive-action")
-        except Exception:
-            pass
-        try:
-            # make repo action buttons fixed-size like store buttons
-            edit_btn.set_size_request(60, 24)
-            del_btn.set_size_request(60, 24)
-        except Exception:
-            pass
-        btn_box.pack_start(edit_btn, False, False, 0)
         btn_box.pack_start(detail_btn, False, False, 0)
-        btn_box.pack_start(del_btn, False, False, 0)
 
         hbox.pack_start(left_v, True, True, 0)
         hbox.pack_start(btn_box, False, False, 0)
@@ -144,8 +127,6 @@ class RepoGui:
         self.row.repo = repo
         self.row.add(outer)
 
-        edit_btn.connect("clicked", self.on_edit_clicked)
-        del_btn.connect("clicked", self.on_delete_clicked)
         try:
             detail_btn.connect("clicked", self.on_detail_clicked)
         except Exception:
@@ -160,6 +141,10 @@ class RepoGui:
             pass
         try:
             self.parent.set_selected_repo(getattr(self.repo, "_id", None))
+        except Exception:
+            pass
+        try:
+            self.parent.set_active_repo_for_actions(self.repo)
         except Exception:
             pass
 
@@ -185,109 +170,6 @@ class RepoGui:
                 self.parent.show_detail_message(f"Error showing branch details: {e}")
             except Exception:
                 pass
-
-    def on_edit_clicked(self, _btn):
-        # Inline dialog to edit repo name and description
-        dialog = gtk.Dialog(title=f"Edit Repo {self.repo.name}", parent=self.parent, flags=gtk.DialogFlags.MODAL)
-        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
-        dialog.add_button("OK", gtk.ResponseType.OK)
-        content = dialog.get_content_area()
-
-        grid = gtk.Grid(column_spacing=6, row_spacing=6, margin=12)
-        name_label = gtk.Label(label="Name:", xalign=0)
-        name_entry = gtk.Entry()
-        name_entry.set_text(self.repo.name)
-
-        desc_label = gtk.Label(label="Description:", xalign=0)
-        desc_view = gtk.TextView()
-        try:
-            buf = desc_view.get_buffer()
-            buf.set_text(getattr(self.repo, "description", "") or "")
-        except Exception:
-            pass
-        desc_scrolled = gtk.ScrolledWindow()
-        desc_scrolled.set_policy(gtk.PolicyType.AUTOMATIC, gtk.PolicyType.AUTOMATIC)
-        desc_scrolled.set_min_content_height(80)
-        desc_scrolled.add(desc_view)
-
-        grid.attach(name_label, 0, 0, 1, 1)
-        grid.attach(name_entry, 1, 0, 1, 1)
-        grid.attach(desc_label, 0, 1, 1, 1)
-        grid.attach(desc_scrolled, 1, 1, 1, 1)
-        content.add(grid)
-        dialog.show_all()
-        resp = dialog.run()
-        if resp == gtk.ResponseType.OK:
-            new_name = name_entry.get_text().strip()
-            try:
-                buf = desc_view.get_buffer()
-                start = buf.get_start_iter()
-                end = buf.get_end_iter()
-                new_desc = buf.get_text(start, end, True).strip()
-            except Exception:
-                new_desc = ""
-
-            # Basic uniqueness check within current store
-            try:
-                cfg = core.get_current_config()
-                store_id = getattr(cfg, "current_store_id", None)
-                if new_name != self.repo.name and core.Repos.filter(lambda k: k["name"] == new_name and k["store_id"] == store_id):
-                    md = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Repo with name '{new_name}' already exists in this store")
-                    md.run()
-                    md.destroy()
-                    dialog.destroy()
-                    return
-            except Exception:
-                pass
-
-            try:
-                self.repo.name = new_name
-                self.repo.description = new_desc
-                core.Repos.update(self.repo)
-            except Exception as e:
-                md = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Error updating repo: {e}")
-                md.run()
-                md.destroy()
-            else:
-                try:
-                    self.refresh_callback()
-                except Exception:
-                    pass
-        dialog.destroy()
-
-    def on_delete_clicked(self, _btn):
-        # Confirm deletion of this repo from the database (do not delete files)
-        repo = self.repo
-        md = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.QUESTION, gtk.ButtonsType.YES_NO, f"Delete repo '{repo.name}' from database? This will NOT delete files on disk.")
-        resp = md.run()
-        md.destroy()
-        if resp != gtk.ResponseType.YES:
-            return
-
-        try:
-            # Remove repo record
-            core.Repos.delete(repo._id)
-            # Remove reference from store
-            try:
-                store: Store = core._get_store_by_id(getattr(repo, "store_id", None))  # type: ignore
-                if store and getattr(store, "repos_ids", None) and repo._id in store.repos_ids:
-                    store.repos_ids.remove(repo._id)
-                    core.Stores.update(store)
-            except Exception:
-                pass
-        except Exception as e:
-            err = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Error deleting repo: {e}")
-            err.run()
-            err.destroy()
-            return
-
-        info = gtk.MessageDialog(self.parent, gtk.DialogFlags.MODAL, gtk.MessageType.INFO, gtk.ButtonsType.OK, f"Repo '{repo.name}' deleted from database")
-        info.run()
-        info.destroy()
-        try:
-            self.refresh_callback()
-        except Exception:
-            pass
 
 
 class StoreGui:
@@ -579,6 +461,31 @@ class MainWindow(gtk.Window):
             self.repos_detail_vbox.get_style_context().add_class("detail-pane")
         except Exception:
             pass
+
+        # Right-pane action bar: always visible, enabled when a repo is active.
+        self._active_repo_for_actions = None
+        self.repos_detail_actions_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
+        self.repos_detail_edit_btn = gtk.Button(label="Edit")
+        self.repos_detail_delete_btn = gtk.Button(label="Delete")
+        try:
+            self.repos_detail_delete_btn.get_style_context().add_class("destructive-action")
+        except Exception:
+            pass
+        try:
+            self.repos_detail_edit_btn.set_size_request(70, 24)
+            self.repos_detail_delete_btn.set_size_request(70, 24)
+        except Exception:
+            pass
+        self.repos_detail_actions_box.pack_start(self.repos_detail_edit_btn, False, False, 0)
+        self.repos_detail_actions_box.pack_start(self.repos_detail_delete_btn, False, False, 0)
+        self.repos_detail_vbox.pack_start(self.repos_detail_actions_box, False, False, 4)
+        try:
+            self.repos_detail_edit_btn.connect("clicked", self.on_repo_edit_clicked)
+            self.repos_detail_delete_btn.connect("clicked", self.on_repo_delete_clicked)
+        except Exception:
+            pass
+        self.set_active_repo_for_actions(None)
+
         repo_paned.pack2(self.repos_detail_vbox, resize=True, shrink=False)
 
         # set initial divider position to half of default window width (window default 900)
@@ -646,6 +553,28 @@ class MainWindow(gtk.Window):
             pass
         try:
             self.create_new_btn.set_sensitive(enabled)
+        except Exception:
+            pass
+
+    def set_active_repo_for_actions(self, repo) -> None:
+        """Set the repository targeted by right-pane Edit/Delete actions."""
+        self._active_repo_for_actions = repo
+        is_enabled = bool(repo is not None)
+        try:
+            self.repos_detail_edit_btn.set_sensitive(is_enabled)
+        except Exception:
+            pass
+        try:
+            self.repos_detail_delete_btn.set_sensitive(is_enabled)
+        except Exception:
+            pass
+
+    def _clear_repo_detail_content(self) -> None:
+        """Clear dynamic right-pane content while preserving the action bar."""
+        try:
+            for child in self.repos_detail_vbox.get_children():
+                if child is not self.repos_detail_actions_box:
+                    self.repos_detail_vbox.remove(child)
         except Exception:
             pass
 
@@ -830,6 +759,12 @@ class MainWindow(gtk.Window):
 
         repos = core.list_repos_in_current_store()
         if not repos:
+            self.set_active_repo_for_actions(None)
+            try:
+                self.set_selected_repo(None)
+            except Exception:
+                pass
+            self._clear_repo_detail_content()
             row = gtk.ListBoxRow()
             lbl = gtk.Label(label="No repos found in the current store", xalign=0)
             lbl.set_xalign(0)
@@ -850,6 +785,17 @@ class MainWindow(gtk.Window):
                 lbl.set_xalign(0)
                 row.add(lbl)
                 self.repos_listbox.add(row)
+
+        # Disable right-pane actions if the active repo is not in the current list.
+        try:
+            active_repo = getattr(self, "_active_repo_for_actions", None)
+            active_id = getattr(active_repo, "_id", None)
+            available_ids = {getattr(r, "_id", None) for r in repos}
+            if active_id not in available_ids:
+                self.set_active_repo_for_actions(None)
+                self._clear_repo_detail_content()
+        except Exception:
+            pass
 
         self.repos_listbox.show_all()
         # If a repo details pane is currently visible, reapply the
@@ -948,12 +894,12 @@ class MainWindow(gtk.Window):
 
     def show_repo_branches(self, repo, branches: list) -> None:
         """Render a selectable list of branches for `repo` into the right pane."""
-        # clear previous
-        for child in self.repos_detail_vbox.get_children():
-            self.repos_detail_vbox.remove(child)
+        # clear dynamic content but keep right-pane action bar
+        self._clear_repo_detail_content()
 
         # remember current repo for commits lookup
         self._last_repo_in_detail = repo
+        self.set_active_repo_for_actions(repo)
         try:
             # visually mark this repo as selected (green border) and clear others
             try:
@@ -1042,11 +988,7 @@ class MainWindow(gtk.Window):
 
         This replaces any existing details content.
         """
-        try:
-            for child in self.repos_detail_vbox.get_children():
-                self.repos_detail_vbox.remove(child)
-        except Exception:
-            pass
+        self._clear_repo_detail_content()
         try:
             lbl = gtk.Label()
             # use simple markup-safe text
@@ -1056,6 +998,126 @@ class MainWindow(gtk.Window):
             lbl.set_line_wrap(True)
             self.repos_detail_vbox.pack_start(lbl, False, False, 4)
             self.repos_detail_vbox.show_all()
+        except Exception:
+            pass
+
+    def on_repo_edit_clicked(self, _btn):
+        """Edit the currently active repository from the right-pane action bar."""
+        repo = getattr(self, "_active_repo_for_actions", None)
+        if repo is None:
+            return
+
+        dialog = gtk.Dialog(title=f"Edit Repo {repo.name}", parent=self, flags=gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("OK", gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+
+        grid = gtk.Grid(column_spacing=6, row_spacing=6, margin=12)
+        name_label = gtk.Label(label="Name:", xalign=0)
+        name_entry = gtk.Entry()
+        name_entry.set_text(repo.name)
+
+        desc_label = gtk.Label(label="Description:", xalign=0)
+        desc_view = gtk.TextView()
+        try:
+            buf = desc_view.get_buffer()
+            buf.set_text(getattr(repo, "description", "") or "")
+        except Exception:
+            pass
+        desc_scrolled = gtk.ScrolledWindow()
+        desc_scrolled.set_policy(gtk.PolicyType.AUTOMATIC, gtk.PolicyType.AUTOMATIC)
+        desc_scrolled.set_min_content_height(80)
+        desc_scrolled.add(desc_view)
+
+        grid.attach(name_label, 0, 0, 1, 1)
+        grid.attach(name_entry, 1, 0, 1, 1)
+        grid.attach(desc_label, 0, 1, 1, 1)
+        grid.attach(desc_scrolled, 1, 1, 1, 1)
+        content.add(grid)
+        dialog.show_all()
+
+        resp = dialog.run()
+        if resp == gtk.ResponseType.OK:
+            new_name = name_entry.get_text().strip()
+            try:
+                buf = desc_view.get_buffer()
+                start = buf.get_start_iter()
+                end = buf.get_end_iter()
+                new_desc = buf.get_text(start, end, True).strip()
+            except Exception:
+                new_desc = ""
+
+            try:
+                cfg = core.get_current_config()
+                store_id = getattr(cfg, "current_store_id", None)
+                if new_name != repo.name and core.Repos.filter(lambda k: k["name"] == new_name and k["store_id"] == store_id):
+                    md = gtk.MessageDialog(self, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Repo with name '{new_name}' already exists in this store")
+                    md.run()
+                    md.destroy()
+                    dialog.destroy()
+                    return
+            except Exception:
+                pass
+
+            try:
+                repo.name = new_name
+                repo.description = new_desc
+                core.Repos.update(repo)
+            except Exception as e:
+                md = gtk.MessageDialog(self, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Error updating repo: {e}")
+                md.run()
+                md.destroy()
+            else:
+                try:
+                    self.populate_repos()
+                except Exception:
+                    pass
+                try:
+                    branches = list_branches(repo.path)
+                    self.show_repo_branches(repo, branches)
+                except Exception as e:
+                    self.show_detail_message(f"Error listing branches: {e}")
+        dialog.destroy()
+
+    def on_repo_delete_clicked(self, _btn):
+        """Delete the currently active repository from the right-pane action bar."""
+        repo = getattr(self, "_active_repo_for_actions", None)
+        if repo is None:
+            return
+
+        md = gtk.MessageDialog(self, gtk.DialogFlags.MODAL, gtk.MessageType.QUESTION, gtk.ButtonsType.YES_NO, f"Delete repo '{repo.name}' from database? This will NOT delete files on disk.")
+        resp = md.run()
+        md.destroy()
+        if resp != gtk.ResponseType.YES:
+            return
+
+        try:
+            core.Repos.delete(repo._id)
+            try:
+                store: Store = core._get_store_by_id(getattr(repo, "store_id", None))  # type: ignore
+                if store and getattr(store, "repos_ids", None) and repo._id in store.repos_ids:
+                    store.repos_ids.remove(repo._id)
+                    core.Stores.update(store)
+            except Exception:
+                pass
+        except Exception as e:
+            err = gtk.MessageDialog(self, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, f"Error deleting repo: {e}")
+            err.run()
+            err.destroy()
+            return
+
+        info = gtk.MessageDialog(self, gtk.DialogFlags.MODAL, gtk.MessageType.INFO, gtk.ButtonsType.OK, f"Repo '{repo.name}' deleted from database")
+        info.run()
+        info.destroy()
+
+        self.set_active_repo_for_actions(None)
+        try:
+            self.set_selected_repo(None)
+        except Exception:
+            pass
+        self._clear_repo_detail_content()
+        try:
+            self.populate_repos()
         except Exception:
             pass
 
