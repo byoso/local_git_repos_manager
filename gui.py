@@ -38,9 +38,6 @@ CSS = b"""
   margin: 4px;
   padding: 6px;
 }
-.repo-row.selected {
-  border: 2px solid #2ecc71;
-}
 .button {
     margin-left: 10px;
     margin-top: 10px;
@@ -65,7 +62,7 @@ def add_button_class(btn):
 
 
 class RepoGui:
-    """Represents a single repository row in the ListBox with a Detail action.
+    """Represents a single repository row in the ListBox.
 
     Each instance creates a `ListBoxRow` stored in `self.row`.
     """
@@ -90,18 +87,9 @@ class RepoGui:
         prefix = "✅" if getattr(repo, "is_active", True) else "❌"
         name_label = gtk.Label(label=f"{prefix}- {repo.name}", xalign=0)
         name_label.set_xalign(0)
-        try:
-            name_label.set_selectable(True)
-        except Exception:
-            pass
         left_v.pack_start(name_label, False, False, 0)
 
-        btn_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
-        detail_btn = gtk.Button(label="Detail")
-        btn_box.pack_start(detail_btn, False, False, 0)
-
         hbox.pack_start(left_v, True, True, 0)
-        hbox.pack_start(btn_box, False, False, 0)
 
         outer.pack_start(hbox, False, False, 0)
 
@@ -113,50 +101,6 @@ class RepoGui:
 
         self.row.repo = repo
         self.row.add(outer)
-
-        try:
-            detail_btn.connect("clicked", self.on_detail_clicked)
-        except Exception:
-            pass
-
-    def on_detail_clicked(self, _btn):
-        """Show branches for this repo in the main window's right pane."""
-        # remember this repo as the last one shown even if it's not a valid git repo
-        try:
-            self.parent._last_repo_in_detail = self.repo
-        except Exception:
-            pass
-        try:
-            self.parent.set_selected_repo(getattr(self.repo, "_id", None))
-        except Exception:
-            pass
-        try:
-            self.parent.set_active_repo_for_actions(self.repo)
-        except Exception:
-            pass
-
-        try:
-            branches = list_branches(self.repo.path)
-        except Exception as e:
-            try:
-                # show error in detail pane instead of modal
-                self.parent.show_detail_message(f"Error listing branches: {e}")
-            except Exception:
-                pass
-            return
-        try:
-            # delegate rendering to the main window
-            self.parent.show_repo_branches(self.repo, branches)
-            try:
-                # update visual selection: highlight this repo and clear others
-                self.parent.set_selected_repo(getattr(self.repo, "_id", None))
-            except Exception:
-                pass
-        except Exception as e:
-            try:
-                self.parent.show_detail_message(f"Error showing branch details: {e}")
-            except Exception:
-                pass
 
 
 class StoreGui:
@@ -428,10 +372,10 @@ class MainWindow(gtk.Window):
         repo_scrolled.set_vexpand(True)
 
         self.repos_listbox = gtk.ListBox()
-        # repos should not be selectable: details are shown via the Detail button
-        self.repos_listbox.set_selection_mode(gtk.SelectionMode.NONE)
+        # repos are selectable: details are shown when a row is selected
+        self.repos_listbox.set_selection_mode(gtk.SelectionMode.SINGLE)
         repo_scrolled.add(self.repos_listbox)
-        # selection of a repo row is not used; details are shown via the 'Detail' button
+        # selection of a repo row drives details rendering
 
         # Split the repositories page in two columns using a Paned so the right
         # pane already occupies space even when empty.
@@ -507,6 +451,7 @@ class MainWindow(gtk.Window):
         # Signals
         add_btn.connect("clicked", self.on_add_store_clicked)
         self.stores_listbox.connect("row-selected", self.on_row_selected)
+        self.repos_listbox.connect("row-selected", self.on_repo_row_selected)
         # repo signals
         try:
             self.add_repo_btn.connect("clicked", self.on_add_repo_clicked)
@@ -837,15 +782,21 @@ class MainWindow(gtk.Window):
         """When a repository row is selected, populate the right pane with branches."""
         if row is None:
             # clear details
+            self.set_active_repo_for_actions(None)
             try:
-                for child in self.repos_detail_vbox.get_children():
-                    self.repos_detail_vbox.remove(child)
+                self.set_selected_repo(None)
             except Exception:
                 pass
+            self._clear_repo_detail_content()
             return
         repo = getattr(row, "repo", None)
         if repo is None:
             return
+        self.set_active_repo_for_actions(repo)
+        try:
+            self.set_selected_repo(getattr(repo, "_id", None))
+        except Exception:
+            pass
         branches = []
         try:
             branches = list_branches(repo.path)
@@ -1156,27 +1107,22 @@ class MainWindow(gtk.Window):
         self.repos_detail_vbox.show_all()
 
     def set_selected_repo(self, repo_id: str | None) -> None:
-        """Visually mark the repo with `repo_id` as selected (green border) and clear others.
+        """Clear any legacy custom selection style for repository rows.
 
-        This toggles the 'selected' CSS class on the repo rows' outer container.
+        Repository selection is now handled by Gtk list selection visuals only.
         """
         try:
             for row in self.repos_listbox.get_children():
                 try:
-                    r = getattr(row, "repo", None)
                     child = row.get_child()
                     if child is None:
                         continue
                     sc = child.get_style_context()
-                    if r is not None and getattr(r, "_id", None) == repo_id:
-                        # add selected class
-                        sc.add_class("selected")
-                    else:
-                        # remove selected class if present
-                        try:
-                            sc.remove_class("selected")
-                        except Exception:
-                            pass
+                    # remove selected class if present from older UI behavior
+                    try:
+                        sc.remove_class("selected")
+                    except Exception:
+                        pass
                 except Exception:
                     continue
         except Exception:
