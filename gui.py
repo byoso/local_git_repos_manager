@@ -38,6 +38,9 @@ CSS = b"""
   margin: 4px;
   padding: 6px;
 }
+.repo-row.selected {
+    border: 2px solid #2ecc71;
+}
 .button {
     margin-left: 10px;
     margin-top: 10px;
@@ -374,10 +377,11 @@ class MainWindow(gtk.Window):
         repo_scrolled.set_vexpand(True)
 
         self.repos_listbox = gtk.ListBox()
-        # repos are selectable: details are shown when a row is selected
-        self.repos_listbox.set_selection_mode(gtk.SelectionMode.SINGLE)
+        # repos are activated on click without keeping a selected highlight
+        self.repos_listbox.set_selection_mode(gtk.SelectionMode.NONE)
+        self.repos_listbox.set_activate_on_single_click(True)
         repo_scrolled.add(self.repos_listbox)
-        # selection of a repo row drives details rendering
+        # row activation drives details rendering
 
         # Split the repositories page in two columns using a Paned so the right
         # pane already occupies space even when empty.
@@ -456,7 +460,7 @@ class MainWindow(gtk.Window):
         # Signals
         add_btn.connect("clicked", self.on_add_store_clicked)
         self.stores_listbox.connect("row-selected", self.on_row_selected)
-        self.repos_listbox.connect("row-selected", self.on_repo_row_selected)
+        self.repos_listbox.connect("row-activated", self.on_repo_row_selected)
         # repo signals
         try:
             self.add_repo_btn.connect("clicked", self.on_add_repo_clicked)
@@ -1139,22 +1143,22 @@ class MainWindow(gtk.Window):
         self.repos_detail_vbox.show_all()
 
     def set_selected_repo(self, repo_id: str | None) -> None:
-        """Clear any legacy custom selection style for repository rows.
-
-        Repository selection is now handled by Gtk list selection visuals only.
-        """
+        """Visually mark the repo with `repo_id` as selected and clear others."""
         try:
             for row in self.repos_listbox.get_children():
                 try:
+                    r = getattr(row, "repo", None)
                     child = row.get_child()
                     if child is None:
                         continue
                     sc = child.get_style_context()
-                    # remove selected class if present from older UI behavior
-                    try:
-                        sc.remove_class("selected")
-                    except Exception:
-                        pass
+                    if r is not None and getattr(r, "_id", None) == repo_id:
+                        sc.add_class("selected")
+                    else:
+                        try:
+                            sc.remove_class("selected")
+                        except Exception:
+                            pass
                 except Exception:
                     continue
         except Exception:
