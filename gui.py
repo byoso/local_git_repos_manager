@@ -89,23 +89,12 @@ class RepoGui:
         left_v = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=2)
         prefix = "✅" if getattr(repo, "is_active", True) else "❌"
         name_label = gtk.Label(label=f"{prefix}- {repo.name}", xalign=0)
-        path_label = gtk.Label(label=getattr(repo, "path", ""), xalign=0)
-        try:
-            tip_title_label = gtk.Label(label="Add remote to your project:", xalign=0)
-            tip_label = gtk.Label(label=f"git remote add local \"{repo.path}\n", xalign=0)
-            tip_label.set_selectable(True)
-        except Exception:
-            tip_title_label = None
-            tip_label = None
         name_label.set_xalign(0)
-        path_label.set_xalign(0)
         try:
             name_label.set_selectable(True)
-            path_label.set_selectable(True)
         except Exception:
             pass
         left_v.pack_start(name_label, False, False, 0)
-        left_v.pack_start(path_label, False, False, 0)
 
         btn_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
         detail_btn = gtk.Button(label="Detail")
@@ -120,8 +109,6 @@ class RepoGui:
         desc_text = getattr(repo, 'description', '') or ''
         desc_label = gtk.Label(label=desc_text, xalign=0)
         desc_label.set_xalign(0)
-        outer.pack_start(tip_title_label, False, False, 0)
-        outer.pack_start(tip_label, False, False, 0)
         outer.pack_start(desc_label, False, False, 0)
 
         self.row.repo = repo
@@ -909,6 +896,9 @@ class MainWindow(gtk.Window):
         except Exception:
             pass
 
+        # Repository metadata block displayed under action buttons.
+        self._render_repo_metadata(repo)
+
         title = gtk.Label()
         try:
             title.set_markup(f"<b>Branches for {GLib.markup_escape_text(repo.name)}</b>")
@@ -982,6 +972,28 @@ class MainWindow(gtk.Window):
         except Exception:
             pass
         self.repos_detail_vbox.show_all()
+
+    def _render_repo_metadata(self, repo) -> None:
+        """Render repo path and remote helper labels in the right detail pane."""
+        if repo is None:
+            return
+
+        path_text = getattr(repo, "path", "") or ""
+        path_label = gtk.Label(label=path_text, xalign=0)
+        helper_label = gtk.Label(label="Add remote to your project:", xalign=0)
+        cmd_label = gtk.Label(label=f"git remote add local \"{path_text}\"", xalign=0)
+        path_label.set_xalign(0)
+        helper_label.set_xalign(0)
+        cmd_label.set_xalign(0)
+        try:
+            path_label.set_selectable(True)
+            cmd_label.set_selectable(True)
+        except Exception:
+            pass
+
+        self.repos_detail_vbox.pack_start(path_label, False, False, 0)
+        self.repos_detail_vbox.pack_start(helper_label, False, False, 0)
+        self.repos_detail_vbox.pack_start(cmd_label, False, False, 2)
 
     def show_detail_message(self, text: str) -> None:
         """Render a simple informational message into the right detail pane.
