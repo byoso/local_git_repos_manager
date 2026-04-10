@@ -89,7 +89,7 @@ def cli_list_repos_in_current_store(**kwargs) -> None:
         prefix = "✅" if repo.is_active else "❌"
         print(f"{prefix}- {repo.name}: {repo.path} ({repo._id})")
         if tip:
-            print(f"git remote add local {repo.path}")
+            print(f"git remote add local \"{repo.path}\"")
 
 def cli_list_branches(repo_name: str, branch_name: str | None = None) -> None:
     repo = get_repo_by_name(repo_name)

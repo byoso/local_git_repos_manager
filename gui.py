@@ -92,7 +92,7 @@ class RepoGui:
         path_label = gtk.Label(label=getattr(repo, "path", ""), xalign=0)
         try:
             tip_title_label = gtk.Label(label="Add remote to your project:", xalign=0)
-            tip_label = gtk.Label(label=f"git remote add local {repo.path}", xalign=0)
+            tip_label = gtk.Label(label=f"git remote add local \"{repo.path}\n", xalign=0)
             tip_label.set_selectable(True)
         except Exception:
             tip_title_label = None
