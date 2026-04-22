@@ -13,7 +13,7 @@ from gi.repository import GLib
 from git_parser import list_branches, list_commits
 
 import core
-from models import Store, Repo
+from models import Store
 
 
 CSS = b"""
@@ -278,7 +278,18 @@ class StoreGui:
 class MainWindow(gtk.Window):
     def __init__(self):
         super().__init__()
-        self.set_title("Local Git Manager")
+        header_bar = gtk.HeaderBar()
+        header_bar.set_title(f"Local Git Manager v{core.VERSION}")
+        header_bar.set_show_close_button(True)
+
+        refresh_icon = gtk.Image.new_from_icon_name("view-refresh", gtk.IconSize.BUTTON)
+        refresh_btn = gtk.Button(label="refresh")
+        refresh_btn.set_image(refresh_icon)
+        refresh_btn.set_always_show_image(True)
+        refresh_btn.connect("clicked", self.on_refresh_clicked)
+        header_bar.pack_start(refresh_btn)
+
+        self.set_titlebar(header_bar)
         self.set_default_size(800, 600)
         try:
             self.set_default_icon_from_file("icon_git.png")
@@ -792,6 +803,16 @@ class MainWindow(gtk.Window):
             md.destroy()
             self.populate_stores()
 
+    def on_refresh_clicked(self, _button):
+        try:
+            self.populate_stores()
+        except Exception:
+            pass
+        try:
+            self.populate_repos()
+        except Exception:
+            pass
+
     def on_row_selected(self, _lb, row):
         if row is None:
             return
@@ -843,6 +864,16 @@ class MainWindow(gtk.Window):
         # if no branches found, provide diagnostic info to help locate the issue
         if not branches:
             try:
+                # Clear the detail pane
+                self._clear_repo_detail_content()
+
+                # Remember current repo
+                self._last_repo_in_detail = repo
+
+                # Render the remote helper message first
+                self._render_repo_metadata(repo)
+
+                # Then add diagnostic info below
                 p = Path(getattr(repo, 'path', ''))
                 exists = p.exists()
                 dotgit = (p / '.git').exists()
@@ -851,11 +882,12 @@ class MainWindow(gtk.Window):
                     f"No branches found for repo '{getattr(repo,'name','')}'\n"
                     f"path: {p}\nexists: {exists}\n.git present: {dotgit}\nobjects present: {objects}"
                 )
-                # render diagnostic info in the detail pane
-                try:
-                    self.show_detail_message(info_txt)
-                except Exception:
-                    pass
+                # Create and add diagnostic label
+                diag_label = gtk.Label(label=info_txt, xalign=0)
+                diag_label.set_xalign(0)
+                diag_label.set_line_wrap(True)
+                self.repos_detail_vbox.pack_start(diag_label, False, False, 4)
+                self.repos_detail_vbox.show_all()
                 return
             except Exception:
                 pass
