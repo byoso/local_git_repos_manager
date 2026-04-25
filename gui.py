@@ -813,6 +813,29 @@ class MainWindow(gtk.Window):
         except Exception:
             pass
 
+        # If a repository is currently selected in the right pane, refresh its details
+        repo = getattr(self, "_last_repo_in_detail", None)
+        if repo is not None:
+            try:
+                # Try to get the latest repo object from the current store's repo list
+                repos = core.list_repos_in_current_store()
+                updated_repo = None
+                for r in repos:
+                    if getattr(r, "_id", None) == getattr(repo, "_id", None):
+                        updated_repo = r
+                        break
+                if updated_repo is not None:
+                    from git_parser import list_branches
+                    branches = []
+                    try:
+                        branches = list_branches(updated_repo.path)
+                    except Exception as e:
+                        self.show_detail_message(f"Error listing branches: {e}")
+                        return
+                    self.show_repo_branches(updated_repo, branches)
+            except Exception:
+                pass
+
     def on_row_selected(self, _lb, row):
         if row is None:
             return
