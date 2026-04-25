@@ -1219,8 +1219,9 @@ class MainWindow(gtk.Window):
         except Exception:
             pass
 
+
     def on_branch_combo_changed(self, combo):
-        """Update SHA label when branch dropdown selection changes."""
+        """Update SHA label and right pane data when branch dropdown selection changes."""
         try:
             idx = combo.get_active()
             if idx is None or idx < 0:
@@ -1235,13 +1236,11 @@ class MainWindow(gtk.Window):
             try:
                 self.update_commits_area(self._last_repo_in_detail, b.get("ref"))
             except Exception:
-                try:
-                    # fallback: if update_commits_area needs repo, try to read repo from title
-                    pass
-                except Exception:
-                    pass
+                pass
         except Exception:
             pass
+        # Always refresh the right pane to show the new branch's data
+        self.repos_detail_vbox.show_all()
 
     def update_commits_area(self, repo, branch_ref: str | None) -> None:
         """Populate the commits scrolled area for given branch_ref.
@@ -1293,18 +1292,125 @@ class MainWindow(gtk.Window):
             return
         label_commit_title = gtk.Label(label="Recent commits:", xalign=0)
         self._commits_box.pack_start(label_commit_title, False, False, 2)
+
         for c in commits:
             sha = c.get('sha', '')
             author = c.get('author', '')
             date = c.get('date', '')
             subject = c.get('subject', '')
+
+            # Create a horizontal box for the diff button and commit info
+            hbox = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
+
+            # Diff button
+            diff_btn = gtk.Button(label="diff")
+            add_button_class(diff_btn)
+            diff_btn.set_size_request(50, 24)
+
+            def on_diff_clicked(_btn, sha=sha, repo_path=repo_path):
+                self.show_commit_diff_window(repo_path, sha)
+            diff_btn.connect("clicked", on_diff_clicked)
+
+            hbox.pack_start(diff_btn, False, False, 0)
+
+            # Commit info label
             lbl = gtk.Label(label=f"{sha}\n{author} {date}\n{subject}\n", xalign=0)
             try:
                 lbl.set_selectable(True)
             except Exception:
                 pass
             lbl.set_xalign(0)
-            self._commits_box.pack_start(lbl, False, False, 2)
+            hbox.pack_start(lbl, True, True, 0)
+
+            self._commits_box.pack_start(hbox, False, False, 2)
+
+
+
+    def show_commit_diff_window(self, repo_path, sha):
+        """Open a new window showing the git diff for the given commit, with colored highlights."""
+        if not repo_path or not sha:
+            md = gtk.MessageDialog(self, gtk.DialogFlags.MODAL, gtk.MessageType.ERROR, gtk.ButtonsType.OK, "Missing repo path or commit SHA for diff.")
+            md.run()
+            md.destroy()
+            return
+
+        # Determine if the commit has a parent
+        has_parent = True
+        try:
+            parent_cmd = ["git", "-C", str(repo_path), "rev-list", "--parents", "-n", "1", sha]
+            result = subprocess.run(parent_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if result.returncode == 0:
+                parts = result.stdout.strip().split()
+                # parts[0] is the commit itself, if len(parts) == 1, no parent
+                if len(parts) == 1:
+                    has_parent = False
+        except Exception:
+            has_parent = True  # fallback: try diff
+
+        # Get the diff output
+        try:
+            if has_parent:
+                diff_cmd = ["git", "-C", str(repo_path), "diff", f"{sha}^", sha]
+            else:
+                diff_cmd = ["git", "-C", str(repo_path), "show", sha]
+            result = subprocess.run(diff_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if result.returncode != 0:
+                diff_text = result.stderr or "Error running git diff/show."
+            else:
+                diff_text = result.stdout or "(No diff output)"
+        except Exception as e:
+            diff_text = f"Exception running git diff/show: {e}"
+
+        # Create a new window to show the diff
+        diff_win = gtk.Window(title=f"Diff for {sha}")
+        diff_win.set_default_size(900, 600)
+        vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
+        diff_win.add(vbox)
+
+        # Scrolled text view for diff output
+        scrolled = gtk.ScrolledWindow()
+        scrolled.set_policy(gtk.PolicyType.AUTOMATIC, gtk.PolicyType.AUTOMATIC)
+        scrolled.set_hexpand(True)
+        scrolled.set_vexpand(True)
+        vbox.pack_start(scrolled, True, True, 0)
+
+        textview = gtk.TextView()
+        textview.set_editable(False)
+        textview.set_cursor_visible(False)
+        textview.set_wrap_mode(gtk.WrapMode.NONE)
+        buf = textview.get_buffer()
+
+        # Create tags for coloring
+        tag_add = buf.create_tag("diff_add", background="#d6f5d6", foreground="#175317")  # light green bg, green fg
+        tag_del = buf.create_tag("diff_del", background="#ffd6d6", foreground="#862121")  # light red bg, red fg
+        tag_head = buf.create_tag("diff_head", weight=700, background="#cce6ff", foreground="#0050a0")  # bold, blue bg, blue fg
+        tag_diff = buf.create_tag("diff_diff", weight=700)  # bold text for diff --git
+        tag_default = buf.create_tag("diff_default")
+
+        # Insert lines with color tags
+        iter_ = buf.get_start_iter()
+        for line in diff_text.splitlines(True):  # keep line endings
+            if line.startswith("diff --git"):
+                buf.insert_with_tags(iter_, line, tag_diff)
+            elif line.startswith("+") and not line.startswith("+++ "):
+                buf.insert_with_tags(iter_, line, tag_add)
+            elif line.startswith("-") and not line.startswith("--- "):
+                buf.insert_with_tags(iter_, line, tag_del)
+            elif line.startswith("@@"):
+                buf.insert_with_tags(iter_, line, tag_head)
+            else:
+                buf.insert_with_tags(iter_, line, tag_default)
+
+        scrolled.add(textview)
+
+        # Close button
+        close_btn = gtk.Button(label="Close")
+        add_button_class(close_btn)
+        close_btn.set_size_request(80, 28)
+        close_btn.connect("clicked", lambda btn: diff_win.destroy())
+        vbox.pack_start(close_btn, False, False, 6)
+
+        diff_win.show_all()
 
         self.repos_detail_vbox.show_all()
 

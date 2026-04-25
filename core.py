@@ -10,7 +10,7 @@ from silly_engine.logger import Logger
 logger = Logger("core.py")
 logger.level = logging.DEBUG
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 
 db = get_db()
 Config = db.collection("config", model=Configuration)
